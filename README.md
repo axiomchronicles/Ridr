@@ -37,6 +37,22 @@ Set `VITE_GOOGLE_MAPS_API_KEY` in `.env` with a browser key that has these APIs 
 - Geocoding API
 - Places API
 
+Set `VITE_API_BASE_URL` in `.env` to point to the FastAPI server (default: `http://localhost:8000/api/v1`).
+
+### Backend Setup (FastAPI)
+
+The backend lives in `server/` and uses FastAPI + SQLAlchemy + JWT auth.
+
+```bash
+cd server
+source env/bin/activate
+env/bin/pip install -r requirements.txt
+cp .env.example .env
+env/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir .
+```
+
+API docs will be available at `http://localhost:8000/docs`.
+
 ### Development
 
 Start the development server with HMR:

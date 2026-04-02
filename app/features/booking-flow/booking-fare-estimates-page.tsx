@@ -374,7 +374,7 @@ export function BookingFareEstimatesPage() {
 
   return (
     <div className="booking-page">
-      <RidrTopNav active="dashboard" />
+      <RidrTopNav active="ride" />
 
       <main className="booking-main-canvas">
         <MapCanvas

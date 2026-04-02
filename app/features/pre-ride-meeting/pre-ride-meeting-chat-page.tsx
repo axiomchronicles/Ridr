@@ -230,7 +230,7 @@ export function PreRideMeetingChatPage() {
         </section>
       </main>
 
-      <RidrMobileNav active="ride" />
+      <RidrMobileNav active="history" />
     </div>
   );
 }

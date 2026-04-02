@@ -1,0 +1,1 @@
+"""Ridr backend application package."""

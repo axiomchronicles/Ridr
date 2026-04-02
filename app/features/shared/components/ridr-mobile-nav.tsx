@@ -10,10 +10,16 @@ type RidrMobileNavProps = {
 const items: Array<{ label: string; to: string; key: NavSection; icon: string }> = [
   { label: "Home", to: "/", key: "dashboard", icon: "home" },
   {
-    label: "Ride",
+    label: "Book",
     to: "/booking/fare-estimates",
     key: "ride",
     icon: "directions_car",
+  },
+  {
+    label: "Chat",
+    to: "/ride/pre-meeting-chat",
+    key: "history",
+    icon: "chat_bubble",
   },
   {
     label: "Impact",
