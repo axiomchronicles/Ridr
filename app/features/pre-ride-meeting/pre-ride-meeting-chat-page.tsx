@@ -1,5 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 
+import { getAccessToken, getStoredUser } from "~/features/auth/auth-client";
+import {
+  connectRideChatSocket,
+  fetchRideChatMessages,
+  postRideChatMessage,
+  type RideChatMessage,
+} from "~/features/mobility/mobility-client";
 import { RidrMobileNav } from "~/features/shared/components/ridr-mobile-nav";
 import { RidrTopNav } from "~/features/shared/components/ridr-top-nav";
 import { MaterialSymbol } from "~/features/shared/components/material-symbol";
@@ -54,15 +62,155 @@ const mapImage =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuC1RKftOEC1zqgqlSwilu2OONVXOySxsR6d8bKa45JGg2iWf2UOukTwf9wYXWmIH_YlMDuSAhedKfkNuRFmiYAZeABlKfxfzsWu-tm7JCLpdqNpbJBVTASpSarFnKeqWYSKAepFmjDzLfFRehfocfQ4iVqbxsA6zble-Rw68qe46ltt_wlDIppdbYu6crdIqhx1u4EJyTmry2dvxb3E2onjVGg5_8JjiIEmFtl30fd_Du74liwkp4ynfCNz1lkHGPSLX3q70cQrLPPH";
 
 export function PreRideMeetingChatPage() {
+  const [searchParams] = useSearchParams();
+  const rideId = searchParams.get("rideId")?.trim() || "";
+
+  const authToken = useMemo(
+    () => (typeof window === "undefined" ? null : getAccessToken()),
+    [],
+  );
+  const currentUserId = useMemo(
+    () => (typeof window === "undefined" ? null : getStoredUser()?.id ?? null),
+    [],
+  );
+
   const [messages, setMessages] = useState(initialMessages);
   const [draft, setDraft] = useState("");
+  const [chatConnectionStatus, setChatConnectionStatus] = useState(
+    rideId ? "Connecting to live chat..." : "Using local chat preview",
+  );
+  const chatSocketRef = useRef<WebSocket | null>(null);
 
   const canSend = useMemo(() => draft.trim().length > 0, [draft]);
 
-  function sendMessage(text: string) {
+  function formatMessageTime(value: string): string {
+    const parsedDate = new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "Now";
+    }
+
+    return parsedDate.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function toUiMessage(message: RideChatMessage): ChatMessage {
+    let author: ChatMessage["author"] = "driver";
+
+    if (message.sender_role === "system") {
+      author = "system";
+    } else if (currentUserId && message.sender_id === currentUserId) {
+      author = "user";
+    }
+
+    return {
+      id: `msg-${message.id}`,
+      author,
+      text: message.text,
+      time: message.sender_role === "system" ? undefined : formatMessageTime(message.created_at),
+    };
+  }
+
+  useEffect(() => {
+    if (!rideId || !authToken) {
+      return;
+    }
+
+    const token = authToken;
+
+    let disposed = false;
+
+    async function initializeLiveChat() {
+      try {
+        const history = await fetchRideChatMessages(token, rideId);
+        if (!disposed && history.length > 0) {
+          setMessages(history.map((message) => toUiMessage(message)));
+        }
+      } catch {
+        if (!disposed) {
+          setChatConnectionStatus("Unable to load previous messages. Live chat will continue.");
+        }
+      }
+
+      const socket = connectRideChatSocket({
+        token,
+        rideId,
+        onMessage: (message) => {
+          if (disposed) {
+            return;
+          }
+
+          setMessages((current) => {
+            const nextMessage = toUiMessage(message);
+            if (current.some((item) => item.id === nextMessage.id)) {
+              return current;
+            }
+            return [...current, nextMessage];
+          });
+        },
+      });
+
+      socket.addEventListener("open", () => {
+        if (!disposed) {
+          setChatConnectionStatus("Live chat connected");
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        if (!disposed) {
+          setChatConnectionStatus("Live chat disconnected");
+        }
+      });
+
+      socket.addEventListener("error", () => {
+        if (!disposed) {
+          setChatConnectionStatus("Live chat encountered a connection issue");
+        }
+      });
+
+      chatSocketRef.current = socket;
+    }
+
+    void initializeLiveChat();
+
+    return () => {
+      disposed = true;
+      if (chatSocketRef.current) {
+        chatSocketRef.current.close();
+        chatSocketRef.current = null;
+      }
+    };
+  }, [authToken, rideId]);
+
+  async function sendMessage(text: string) {
     const value = text.trim();
     if (!value) {
       return;
+    }
+
+    const socket = chatSocketRef.current;
+    if (rideId && socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({
+          type: "chat_message",
+          text: value,
+        }),
+      );
+      setDraft("");
+      return;
+    }
+
+    if (rideId && authToken) {
+      try {
+        const createdMessage = await postRideChatMessage(authToken, rideId, value);
+        setMessages((current) => [...current, toUiMessage(createdMessage)]);
+        setDraft("");
+        return;
+      } catch {
+        setChatConnectionStatus("Message could not be sent. Please retry.");
+        return;
+      }
     }
 
     setMessages((current) => [
@@ -153,7 +301,7 @@ export function PreRideMeetingChatPage() {
               <span className="chat-online-dot" />
               <strong>Meeting Chat</strong>
             </div>
-            <button type="button">
+            <button type="button" title={chatConnectionStatus}>
               <MaterialSymbol name="security" className="chat-safe-icon" />
               Safety
             </button>
@@ -188,7 +336,7 @@ export function PreRideMeetingChatPage() {
 
             <div className="chat-quick-replies">
               {quickReplies.map((reply) => (
-                <button key={reply} type="button" onClick={() => sendMessage(reply)}>
+                <button key={reply} type="button" onClick={() => void sendMessage(reply)}>
                   {reply}
                 </button>
               ))}
@@ -214,14 +362,14 @@ export function PreRideMeetingChatPage() {
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
-                  sendMessage(draft);
+                  void sendMessage(draft);
                 }
               }}
             />
             <button
               type="button"
               aria-label="Send message"
-              onClick={() => sendMessage(draft)}
+              onClick={() => void sendMessage(draft)}
               disabled={!canSend}
             >
               <MaterialSymbol name="send" filled />

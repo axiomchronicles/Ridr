@@ -98,7 +98,7 @@ export function BookingInputsPanel({
         </div>
 
         <div className="route-fields">
-          <label className="route-field route-field-muted">
+          <div className="route-field route-field-muted" role="group" aria-label="Pickup field">
             <div className="route-field-head">
               <span className="route-label">Pickup</span>
               <div className="route-field-actions">
@@ -133,18 +133,18 @@ export function BookingInputsPanel({
               placeholder="Choose pickup"
               ariaLabel="Pickup"
               inputClassName="route-input"
-                recentStorageNamespace="booking-pickup"
-                showCurrentLocationAction
-                currentLocationActionLabel={
-                  isCurrentLocationLoading ? "Locating..." : "Use current location"
-                }
-                onUseCurrentLocation={
-                  isCurrentLocationLoading ? undefined : onRequestCurrentLocation
-                }
+              recentStorageNamespace="booking-pickup"
+              showCurrentLocationAction
+              currentLocationActionLabel={
+                isCurrentLocationLoading ? "Locating..." : "Use current location"
+              }
+              onUseCurrentLocation={
+                isCurrentLocationLoading ? undefined : onRequestCurrentLocation
+              }
             />
-          </label>
+          </div>
 
-          <label className="route-field route-field-active">
+          <div className="route-field route-field-active" role="group" aria-label="Destination field">
             <div className="route-field-head">
               <span className="route-label route-label-active">Destination</span>
               {destination ? (
@@ -166,9 +166,9 @@ export function BookingInputsPanel({
               placeholder="Choose destination"
               ariaLabel="Destination"
               inputClassName="route-input"
-                recentStorageNamespace="booking-destination"
+              recentStorageNamespace="booking-destination"
             />
-          </label>
+          </div>
         </div>
       </div>
 

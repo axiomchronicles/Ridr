@@ -19,6 +19,8 @@ import { BookingInputsPanel } from "./components/booking-inputs-panel";
 import { DemandAlertCard } from "./components/demand-alert-card";
 import { MapCanvas } from "./components/map-canvas";
 import { RideSelectionSheet } from "./components/ride-selection-sheet";
+import { getAccessToken } from "~/features/auth/auth-client";
+import { bookRideMatch } from "~/features/mobility/mobility-client";
 import { RidrMobileNav } from "~/features/shared/components/ridr-mobile-nav";
 import { RidrTopNav } from "~/features/shared/components/ridr-top-nav";
 import "./booking-flow.css";
@@ -90,6 +92,10 @@ export function BookingFareEstimatesPage() {
     defaultLocationStatusMessage,
   );
   const [savedPlaces, setSavedPlaces] = useState<SavedPlaces>({});
+  const [resolvedPoints, setResolvedPoints] = useState<{
+    pickup: google.maps.LatLngLiteral;
+    destination: google.maps.LatLngLiteral;
+  } | null>(null);
 
   const bookingResetTimerRef = useRef<number | null>(null);
   const locationRequestTokenRef = useRef(0);
@@ -342,6 +348,13 @@ export function BookingFareEstimatesPage() {
     routeSnapshot.hasRoute,
   ]);
 
+  const selectedRide = useMemo(
+    () =>
+      dynamicRideOptions.find((ride) => ride.id === selectedRideId) ??
+      dynamicRideOptions[0],
+    [dynamicRideOptions, selectedRideId],
+  );
+
   useEffect(() => {
     return () => {
       if (bookingResetTimerRef.current !== null) {
@@ -350,8 +363,19 @@ export function BookingFareEstimatesPage() {
     };
   }, []);
 
-  function handleBookRide() {
+  async function handleBookRide() {
     if (bookingStatus === "loading" || !isRouteReady) {
+      return;
+    }
+
+    const token = getAccessToken();
+    if (!token) {
+      setLocationStatusMessage("You must be logged in to book a ride.");
+      return;
+    }
+
+    if (!resolvedPoints) {
+      setLocationStatusMessage("Route coordinates are still loading. Try again in a moment.");
       return;
     }
 
@@ -362,14 +386,80 @@ export function BookingFareEstimatesPage() {
 
     setBookingStatus("loading");
 
-    bookingResetTimerRef.current = window.setTimeout(() => {
+    try {
+      const now = new Date();
+      const departureMinutes = now.getHours() * 60 + now.getMinutes();
+      const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay();
+
+      const bookingResponse = await bookRideMatch(token, {
+        commute: {
+          origin: resolvedPoints.pickup,
+          destination: resolvedPoints.destination,
+          departure_time: departureMinutes,
+          flexibility: 15,
+          days: [dayOfWeek],
+          role: "rider",
+          origin_label: pickup.trim() || "Pickup",
+          destination_label: destination.trim() || "Destination",
+          preferences: {
+            smoking: false,
+            music: true,
+            interests: ["eco", "daily commute"],
+          },
+        },
+        max_candidates: 20,
+        radius_km: 10,
+      });
+
       setBookingStatus("confirmed");
+      setLocationStatusMessage(
+        `Transaction created with ${bookingResponse.matched_user_name}. Awaiting acceptance (${Math.round(bookingResponse.score * 100)}% compatibility).`,
+      );
 
       bookingResetTimerRef.current = window.setTimeout(() => {
-        navigate("/ride/pre-meeting-chat");
+        const nextParams = new URLSearchParams();
+
+        const trimmedPickup = pickup.trim();
+        const trimmedDestination = destination.trim();
+        const selectedImpact = selectedRide.impactLabel?.match(/\d+(?:\.\d+)?/)?.[0] ?? "4.2";
+
+        if (trimmedPickup) {
+          nextParams.set("pickup", trimmedPickup);
+        }
+
+        if (trimmedDestination) {
+          nextParams.set("destination", trimmedDestination);
+        }
+
+        nextParams.set("ride", selectedRide.name);
+        nextParams.set("fare", inrFormatter.format(selectedRide.price));
+        nextParams.set("eta", `${selectedRide.etaMinutes} min`);
+        nextParams.set("route", routeSummaryText);
+        nextParams.set("impactKg", selectedImpact);
+        nextParams.set("rideId", bookingResponse.ride_id);
+        nextParams.set("matchUser", bookingResponse.matched_user_name);
+        nextParams.set("matchScore", String(Math.round(bookingResponse.score * 100)));
+        nextParams.set("pickupLat", String(resolvedPoints.pickup.lat));
+        nextParams.set("pickupLng", String(resolvedPoints.pickup.lng));
+        nextParams.set("destinationLat", String(resolvedPoints.destination.lat));
+        nextParams.set("destinationLng", String(resolvedPoints.destination.lng));
+
+        const nextSearch = nextParams.toString();
+        navigate(
+          nextSearch
+            ? `/ride/finding-your-ride?${nextSearch}`
+            : "/ride/finding-your-ride",
+        );
         bookingResetTimerRef.current = null;
-      }, 800);
-    }, 550);
+      }, 550);
+    } catch (error) {
+      setBookingStatus("idle");
+      setLocationStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to match a nearby ride right now. Try again.",
+      );
+    }
   }
 
   return (
@@ -386,6 +476,7 @@ export function BookingFareEstimatesPage() {
           pickupOverridePoint={pickupOverridePoint}
           onRequestCurrentLocation={requestCurrentLocation}
           isCurrentLocationLoading={isCurrentLocationLoading}
+          onPointsResolved={setResolvedPoints}
         />
 
         <section className="booking-floating-cluster">

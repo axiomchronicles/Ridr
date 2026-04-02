@@ -175,19 +175,19 @@ export function CustomPlaceAutocompleteInput({
   }, [mapsReady]);
 
   useEffect(() => {
-    const handlePointerDown = (event: MouseEvent) => {
+    const handlePointerDown = (event: PointerEvent) => {
       if (!rootRef.current) {
         return;
       }
 
       if (!rootRef.current.contains(event.target as Node)) {
-          closeResults();
+        closeResults();
       }
     };
 
-    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("pointerdown", handlePointerDown);
     return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
     };
   }, []);
 
@@ -421,7 +421,7 @@ export function CustomPlaceAutocompleteInput({
               ]
                 .filter(Boolean)
                 .join(" ")}
-              onMouseDown={(event) => {
+              onPointerDown={(event) => {
                 event.preventDefault();
               }}
               onClick={handleCurrentLocationAction}
@@ -453,7 +453,7 @@ export function CustomPlaceAutocompleteInput({
                   .filter(Boolean)
                   .join(" ")}
                   onMouseEnter={() => setActiveIndex(visualIndex)}
-                onMouseDown={(event) => {
+                onPointerDown={(event) => {
                   event.preventDefault();
                 }}
                 onClick={() => handleSelect(suggestion)}

@@ -38,6 +38,18 @@ env/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir .
 - `POST /api/v1/auth/register` - Register and receive JWT
 - `POST /api/v1/auth/login` - Login and receive JWT
 - `GET /api/v1/auth/me` - Get current user (requires Bearer token)
+- `POST /api/v1/mobility/commutes/upsert` - Upsert user commute profile
+- `POST /api/v1/mobility/matches` - Ranked commute matches with explainability
+- `POST /api/v1/mobility/rides/book` - Create pending ride transaction from matched rider/driver
+- `GET /api/v1/mobility/rides/{ride_uid}` - Ride summary, transaction state, and action capabilities
+- `PATCH /api/v1/mobility/rides/{ride_uid}/transaction` - Transaction actions: modify, cancel, accept
+- `GET /api/v1/mobility/rides/{ride_uid}/chat/messages` - Chat history for a ride
+- `POST /api/v1/mobility/rides/{ride_uid}/chat/messages` - Send a chat message over HTTP
+- `POST /api/v1/mobility/rides/{ride_uid}/tracking` - Persist and broadcast location update
+- `GET /api/v1/mobility/vehicles/nearby` - Nearby active drivers for map markers
+- `WS /api/v1/mobility/rides/{ride_uid}/chat/ws` - Live ride chat channel
+- `WS /api/v1/mobility/rides/{ride_uid}/tracking/ws` - Live ride tracking channel
+- `WS /api/v1/mobility/vehicles/stream/ws` - Nearby vehicle stream for booking map
 
 ## Environment Variables
 
@@ -55,4 +67,5 @@ env/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir .
 
 - SQLite is configured by default for fast local setup.
 - Tables are auto-created at startup.
+- Demo commute + driver location data is seeded automatically on first run.
 - For production, use Postgres and a strong `JWT_SECRET_KEY`.

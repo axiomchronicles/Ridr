@@ -5,6 +5,7 @@ export default [
 	route("auth/login", "routes/login.tsx"),
 	route("auth/register", "routes/register.tsx"),
 	route("booking/fare-estimates", "routes/booking-fare-estimates.tsx"),
+	route("ride/finding-your-ride", "routes/finding-your-ride.tsx"),
 	route("ride/pre-meeting-chat", "routes/pre-ride-meeting-chat.tsx"),
 	route("impact/carbon-neutral", "routes/carbon-neutral.tsx"),
 ] satisfies RouteConfig;

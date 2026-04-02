@@ -49,7 +49,7 @@
 .chat-driver-head h1 {
   margin: 0 0 0.1rem;
   font-family: var(--font-headline);
-  font-size: 2rem;
+  font-size: 1.65rem;
   line-height: 1;
   letter-spacing: -0.03em;
 }
@@ -98,7 +98,7 @@
 }
 
 .chat-driver-meta strong {
-  font-size: 1.04rem;
+  font-size: 0.93rem;
   font-weight: 700;
 }
 
@@ -137,7 +137,7 @@
 }
 
 .chat-driver-stats strong {
-  font-size: 1.68rem;
+  font-size: 1.38rem;
   line-height: 1;
   letter-spacing: -0.03em;
   font-family: var(--font-headline);
@@ -201,7 +201,7 @@
 
 .chat-meeting-map strong {
   font-family: var(--font-headline);
-  font-size: 1.48rem;
+  font-size: 1.23rem;
   letter-spacing: -0.02em;
 }
 
@@ -269,7 +269,7 @@
 
 .chat-panel-header strong {
   font-family: var(--font-headline);
-  font-size: 1.58rem;
+  font-size: 1.35rem;
   letter-spacing: -0.02em;
 }
 
@@ -334,7 +334,7 @@
   border-radius: 0.85rem 0.85rem 0.85rem 0.12rem;
   background: #eef0f2;
   padding: 0.72rem 0.85rem;
-  font-size: 1.06rem;
+  font-size: 0.95rem;
   line-height: 1.35;
 }
 
@@ -386,7 +386,7 @@
 .chat-info-card strong {
   display: block;
   margin-bottom: 0.08rem;
-  font-size: 0.96rem;
+  font-size: 0.87rem;
 }
 
 .chat-info-card p {
@@ -421,7 +421,7 @@
   border-radius: 0.73rem;
   background: #f1f3f4;
   padding: 0.62rem 0.8rem;
-  font-size: 0.98rem;
+  font-size: 0.9rem;
 }
 
 .chat-input-row input:focus-visible {

@@ -10,6 +10,12 @@ import {
 
 import { mapBackgroundImage } from "../booking-flow.data";
 import type { DepartureMode, RideId, RouteSnapshot } from "../booking-flow.types";
+import { getAccessToken } from "~/features/auth/auth-client";
+import {
+  connectVehicleStreamSocket,
+  fetchNearbyVehicles,
+  type VehicleMarker,
+} from "~/features/mobility/mobility-client";
 import { MaterialSymbol } from "~/features/shared/components/material-symbol";
 import {
   GOOGLE_MAPS_LOADER_ID,
@@ -155,6 +161,10 @@ type MapCanvasProps = {
   pickupOverridePoint: google.maps.LatLngLiteral | null;
   onRequestCurrentLocation: () => void;
   isCurrentLocationLoading: boolean;
+  onPointsResolved?: (points: {
+    pickup: google.maps.LatLngLiteral;
+    destination: google.maps.LatLngLiteral;
+  }) => void;
 };
 
 type RouteChoice = {
@@ -187,6 +197,37 @@ function toRouteSnapshot(route: google.maps.DirectionsRoute | undefined): RouteS
     durationText: leg.duration_in_traffic?.text || leg.duration?.text || "--",
     hasRoute: distanceMiles > 0 && durationMinutes > 0,
   };
+}
+
+function buildTaxiIconSvg(fillColor: string): string {
+  return `<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg"><circle cx="18" cy="18" r="17" fill="#ffffff" fill-opacity="0.95"/><path d="M8 20.5c0-1.38 1.12-2.5 2.5-2.5h15c1.38 0 2.5 1.12 2.5 2.5V24a1 1 0 0 1-1 1h-1.4a2.6 2.6 0 0 1-5.2 0h-4.8a2.6 2.6 0 0 1-5.2 0H9a1 1 0 0 1-1-1v-3.5Z" fill="${fillColor}"/><path d="M11.2 18 13 13.8a2 2 0 0 1 1.84-1.22h6.32A2 2 0 0 1 23 13.8L24.8 18H11.2Z" fill="${fillColor}"/><circle cx="12.8" cy="25" r="1.5" fill="#1f2a25"/><circle cx="23.2" cy="25" r="1.5" fill="#1f2a25"/><text x="18" y="17.2" text-anchor="middle" font-size="5.4" font-family="Inter, sans-serif" font-weight="700" fill="#ffffff">CAB</text></svg>`;
+}
+
+function buildTaxiIcon(status: string): google.maps.Icon | undefined {
+  if (typeof google === "undefined") {
+    return undefined;
+  }
+
+  const fillColor =
+    status === "assigned"
+      ? "#0f6d43"
+      : status === "busy"
+        ? "#1464a5"
+        : "#2e7a4a";
+
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(buildTaxiIconSvg(fillColor))}`,
+    scaledSize: new google.maps.Size(30, 30),
+    anchor: new google.maps.Point(15, 15),
+  };
+}
+
+function mergeVehicleMarkers(
+  current: VehicleMarker[],
+  nextMarker: VehicleMarker,
+): VehicleMarker[] {
+  const deduped = current.filter((item) => item.user_id !== nextMarker.user_id);
+  return [nextMarker, ...deduped].slice(0, 28);
 }
 
 async function geocodeWithFallback(
@@ -258,6 +299,7 @@ function InteractiveMapCanvas({
   pickupOverridePoint,
   onRequestCurrentLocation,
   isCurrentLocationLoading,
+  onPointsResolved,
 }: {
   apiKey: string;
   pickup: string;
@@ -268,6 +310,10 @@ function InteractiveMapCanvas({
   pickupOverridePoint: google.maps.LatLngLiteral | null;
   onRequestCurrentLocation: () => void;
   isCurrentLocationLoading: boolean;
+  onPointsResolved?: (points: {
+    pickup: google.maps.LatLngLiteral;
+    destination: google.maps.LatLngLiteral;
+  }) => void;
 }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_LOADER_ID,
@@ -293,6 +339,7 @@ function InteractiveMapCanvas({
   );
   const [showTraffic, setShowTraffic] = useState(false);
   const [showTransit, setShowTransit] = useState(mapTheme.enableTransitByDefault);
+  const [nearbyVehicles, setNearbyVehicles] = useState<VehicleMarker[]>([]);
 
   const hasPickupSource =
     Boolean(pickupOverridePoint) || normalizeAddress(debouncedPickup).length > 0;
@@ -380,6 +427,13 @@ function InteractiveMapCanvas({
   useEffect(() => {
     setShowTransit(mapTheme.enableTransitByDefault);
   }, [mapTheme.enableTransitByDefault]);
+
+  useEffect(() => {
+    onPointsResolved?.({
+      pickup: pickupPoint,
+      destination: destinationPoint,
+    });
+  }, [destinationPoint, onPointsResolved, pickupPoint]);
 
   useEffect(() => {
     const debounceId = window.setTimeout(() => {
@@ -532,6 +586,62 @@ function InteractiveMapCanvas({
   ]);
 
   useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    const token = getAccessToken();
+    if (!token) {
+      setNearbyVehicles([]);
+      return;
+    }
+
+    const authToken = token;
+
+    let disposed = false;
+    let ws: WebSocket | null = null;
+
+    async function hydrateNearbyVehicles() {
+      try {
+        const markers = await fetchNearbyVehicles(authToken, {
+          lat: pickupPoint.lat,
+          lng: pickupPoint.lng,
+          radiusKm: 10,
+        });
+
+        if (!disposed) {
+          setNearbyVehicles(markers);
+        }
+      } catch {
+        if (!disposed) {
+          setNearbyVehicles([]);
+        }
+      }
+
+      ws = connectVehicleStreamSocket({
+        token: authToken,
+        lat: pickupPoint.lat,
+        lng: pickupPoint.lng,
+        radiusKm: 10,
+        onVehicleUpdate: (vehicle) => {
+          if (!disposed) {
+            setNearbyVehicles((current) => mergeVehicleMarkers(current, vehicle));
+          }
+        },
+      });
+    }
+
+    void hydrateNearbyVehicles();
+
+    return () => {
+      disposed = true;
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [isLoaded, pickupPoint.lat, pickupPoint.lng]);
+
+  useEffect(() => {
     if (!directionsResult) {
       return;
     }
@@ -591,6 +701,15 @@ function InteractiveMapCanvas({
           icon={destinationIcon}
           label={{ text: "D", color: "#ffffff", fontWeight: "700" }}
         />
+
+        {nearbyVehicles.map((vehicle) => (
+          <MarkerF
+            key={`vehicle-${vehicle.user_id}`}
+            position={{ lat: vehicle.lat, lng: vehicle.lng }}
+            title={`${vehicle.vehicle_name || "Ridr cab"} • ${vehicle.distance_km} km away`}
+            icon={buildTaxiIcon(vehicle.status)}
+          />
+        ))}
 
         {directionsResult ? (
           <DirectionsRenderer
@@ -692,6 +811,7 @@ function InteractiveMapCanvas({
         <small>
           {normalizeAddress(pickup) || "Pickup"} to {normalizeAddress(destination) || "Destination"}
         </small>
+        <small>{nearbyVehicles.length} nearby cabs live</small>
       </aside>
 
       {routeChoices.length > 1 ? (
@@ -729,6 +849,7 @@ export function MapCanvas({
   pickupOverridePoint,
   onRequestCurrentLocation,
   isCurrentLocationLoading,
+  onPointsResolved,
 }: MapCanvasProps) {
   const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -753,6 +874,7 @@ export function MapCanvas({
       pickupOverridePoint={pickupOverridePoint}
       onRequestCurrentLocation={onRequestCurrentLocation}
       isCurrentLocationLoading={isCurrentLocationLoading}
+      onPointsResolved={onPointsResolved}
     />
   );
 }
