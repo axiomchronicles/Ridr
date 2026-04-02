@@ -11,6 +11,10 @@ import {
 import { mapBackgroundImage } from "../booking-flow.data";
 import type { DepartureMode, RideId, RouteSnapshot } from "../booking-flow.types";
 import { MaterialSymbol } from "~/features/shared/components/material-symbol";
+import {
+  GOOGLE_MAPS_LOADER_ID,
+  GOOGLE_MAPS_PLACES_LIBRARIES,
+} from "~/features/shared/constants/google-maps";
 
 const defaultPickupPoint: google.maps.LatLngLiteral = {
   lat: 28.6139,
@@ -21,8 +25,6 @@ const defaultDestinationPoint: google.maps.LatLngLiteral = {
   lat: 28.6304,
   lng: 77.2177,
 };
-
-const mapLibraries: Array<"places"> = ["places"];
 
 const emptyRouteSnapshot: RouteSnapshot = {
   distanceMiles: 0,
@@ -268,9 +270,9 @@ function InteractiveMapCanvas({
   isCurrentLocationLoading: boolean;
 }) {
   const { isLoaded, loadError } = useJsApiLoader({
-    id: "ridr-google-map",
+    id: GOOGLE_MAPS_LOADER_ID,
     googleMapsApiKey: apiKey,
-    libraries: mapLibraries,
+    libraries: GOOGLE_MAPS_PLACES_LIBRARIES,
     preventGoogleFontsLoading: true,
   });
 

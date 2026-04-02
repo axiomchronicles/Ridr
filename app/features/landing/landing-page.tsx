@@ -6,6 +6,10 @@ import { RidrMobileNav } from "~/features/shared/components/ridr-mobile-nav";
 import { RidrTopNav } from "~/features/shared/components/ridr-top-nav";
 import { MaterialSymbol } from "~/features/shared/components/material-symbol";
 import { CustomPlaceAutocompleteInput } from "~/features/shared/components/custom-place-autocomplete-input";
+import {
+  GOOGLE_MAPS_LOADER_ID,
+  GOOGLE_MAPS_PLACES_LIBRARIES,
+} from "~/features/shared/constants/google-maps";
 
 import "./landing-page.css";
 
@@ -21,7 +25,6 @@ const crowdOne =
 const crowdTwo =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuDgh-ifjYJl19hk0SE92PJ_4WmTkKjxE67XPh0yargDkyDv7NQWxmYzl0Ge4oSu2mcwUiefgThW72lyJ4iTzmiX106w_mNETVUZFcddodQKd0ms6gojX-rtgL4O7pOGTxieQMje22fYtkonh8QNJYP0L_yYsaurdwIuPMT8tzx6pzwvjvr9Vz9qBzW0RitFVAHkm19TVwT62B8xaGQHVrBWjCKoSZpGB0s6RN7f_DL1eKreX1ge8C4vL15k5N8bIieg71bYnyVjeLND";
 
-const mapLibraries: Array<"places"> = ["places"];
 const savedPlacesStorageKey = "ridr.saved-places";
 const defaultLandingStatusMessage =
   "Use current location or type your route for live map data.";
@@ -184,9 +187,9 @@ function StaticLandingBookingCard({ message }: { message: string }) {
 
 function InteractiveLandingBookingCard({ mapsApiKey }: { mapsApiKey: string }) {
   const { isLoaded, loadError } = useJsApiLoader({
-    id: "ridr-landing-map-data",
+    id: GOOGLE_MAPS_LOADER_ID,
     googleMapsApiKey: mapsApiKey,
-    libraries: mapLibraries,
+    libraries: GOOGLE_MAPS_PLACES_LIBRARIES,
     preventGoogleFontsLoading: true,
   });
 
@@ -468,6 +471,10 @@ function InteractiveLandingBookingCard({ mapsApiKey }: { mapsApiKey: string }) {
                 mapsReady={placesReady}
                 placeholder="Choose pickup"
                 ariaLabel="Pickup"
+                recentStorageNamespace="landing-pickup"
+                showCurrentLocationAction
+                currentLocationActionLabel={isLocating ? "Locating..." : "Use current location"}
+                onUseCurrentLocation={isLocating ? undefined : requestCurrentLocation}
               />
 
             {pickup ? (
@@ -496,6 +503,7 @@ function InteractiveLandingBookingCard({ mapsApiKey }: { mapsApiKey: string }) {
               mapsReady={placesReady}
               placeholder="Enter destination"
               ariaLabel="Destination"
+              recentStorageNamespace="landing-destination"
             />
           </div>
         </label>

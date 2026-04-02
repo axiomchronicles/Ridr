@@ -5,7 +5,7 @@ import { MaterialSymbol } from "./material-symbol";
 export type NavSection = "dashboard" | "impact" | "history" | "ride";
 
 type RidrTopNavProps = {
-  active: NavSection;
+  active?: NavSection;
   showBookNow?: boolean;
 };
 
@@ -55,6 +55,13 @@ export function RidrTopNav({ active, showBookNow = false }: RidrTopNavProps) {
         <div className="ridr-profile-avatar-shell" aria-label="Profile">
           <img src={profileAvatar} alt="Profile" className="ridr-profile-avatar" />
         </div>
+
+        <Link className="ridr-auth-link" to="/auth/login">
+          Log in
+        </Link>
+        <Link className="ridr-auth-link ridr-auth-link-primary" to="/auth/register">
+          Register
+        </Link>
 
         {showBookNow ? (
           <Link className="ridr-book-now" to="/booking/fare-estimates">

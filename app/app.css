@@ -77,6 +77,36 @@ select {
   padding: 0.22rem;
 }
 
+.custom-place-results-header {
+  padding: 0.26rem 0.5rem 0.32rem;
+  color: #7b8780;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.custom-place-action-row {
+  width: 100%;
+  border: none;
+  border-radius: 0.56rem;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  background: rgba(117, 248, 179, 0.16);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  color: #145c3f;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.custom-place-action-row:hover,
+.custom-place-action-row-active {
+  background: rgba(117, 248, 179, 0.28);
+}
+
 .custom-place-results-state {
   padding: 0.55rem 0.6rem;
   color: #66726b;
@@ -92,13 +122,27 @@ select {
   text-align: left;
   background: transparent;
   display: grid;
-  gap: 0.06rem;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.3rem;
+  row-gap: 0.05rem;
+  align-items: start;
   cursor: pointer;
 }
 
 .custom-place-result-item:hover,
 .custom-place-result-item-active {
-  background: rgba(117, 248, 179, 0.2);
+  background: rgba(117, 248, 179, 0.22);
+}
+
+.custom-place-result-item-recent {
+  background: rgba(239, 244, 241, 0.42);
+}
+
+.custom-place-result-icon {
+  grid-row: 1 / span 2;
+  color: #6f7e75;
+  font-size: 0.86rem;
+  margin-top: 0.02rem;
 }
 
 .custom-place-result-main {
@@ -111,6 +155,23 @@ select {
   color: #6a776f;
   font-size: 0.64rem;
   font-weight: 600;
+}
+
+.custom-place-highlight {
+  background: rgba(117, 248, 179, 0.35);
+  color: inherit;
+  border-radius: 0.16rem;
+  padding: 0 0.06rem;
+}
+
+.custom-place-results-footer {
+  margin-top: 0.2rem;
+  border-top: 1px solid rgba(188, 202, 190, 0.36);
+  padding: 0.34rem 0.5rem 0.2rem;
+  color: #76827b;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  font-weight: 700;
 }
 
 .material-symbol {
@@ -243,6 +304,27 @@ select {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.ridr-auth-link {
+  border-radius: 999px;
+  padding: 0.42rem 0.72rem;
+  color: #5f6b74;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.ridr-auth-link:hover {
+  background: rgba(232, 232, 232, 0.76);
+}
+
+.ridr-auth-link-primary {
+  background: #f0f3f5;
+  color: #1f3a4f;
+}
+
+.ridr-auth-link-primary:hover {
+  background: #e4ebef;
 }
 
 .ridr-book-now {
