@@ -23,6 +23,14 @@ export type DriverProfile = {
   badges: string[];
 };
 
+export type RouteSnapshot = {
+  distanceMiles: number;
+  durationMinutes: number;
+  distanceText: string;
+  durationText: string;
+  hasRoute: boolean;
+};
+
 export type DepartureMode = "now" | "later";
 
 export type BookingStatus = "idle" | "loading" | "confirmed";

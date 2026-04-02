@@ -102,12 +102,49 @@
   color: #7d858d;
 }
 
+.landing-route-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.landing-route-inline-action {
+  border: 1px solid rgba(0, 109, 67, 0.24);
+  border-radius: 999px;
+  min-height: 1.35rem;
+  padding: 0.12rem 0.48rem;
+  background: rgba(117, 248, 179, 0.22);
+  color: #0f6941;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.landing-route-inline-action:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.landing-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.34rem;
+}
+
+.landing-input-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
 .landing-input-icon {
   font-size: 0.86rem;
   color: var(--secondary);
 }
 
 .landing-route-stack input {
+  width: 100%;
   border: none;
   outline: none;
   background: transparent;
@@ -115,6 +152,54 @@
   font-size: 1rem;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.landing-input-clear {
+  border: 1px solid rgba(188, 202, 190, 0.48);
+  border-radius: 999px;
+  width: 1.45rem;
+  height: 1.45rem;
+  background: rgba(255, 255, 255, 0.9);
+  display: grid;
+  place-items: center;
+}
+
+.landing-booking-note {
+  margin: 0.2rem 0 0.75rem;
+  color: #5e6871;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.landing-map-insight {
+  margin-bottom: 0.76rem;
+  border-radius: 0.72rem;
+  border: 1px solid rgba(188, 202, 190, 0.44);
+  background: rgba(250, 252, 250, 0.95);
+  padding: 0.46rem 0.58rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.38rem;
+}
+
+.landing-map-insight-icon {
+  margin-top: 0.02rem;
+  color: #0f6d43;
+  font-size: 0.88rem;
+}
+
+.landing-map-insight p {
+  margin: 0;
+  color: #1f4032;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.landing-map-insight small {
+  display: block;
+  margin-top: 0.1rem;
+  color: #66726b;
+  font-size: 0.64rem;
 }
 
 .landing-saved-grid {
@@ -133,6 +218,12 @@
   gap: 0.45rem;
   background: #ffffff;
   text-align: left;
+}
+
+.landing-saved-grid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  background: #f3f5f6;
 }
 
 .landing-saved-icon {

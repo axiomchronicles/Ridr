@@ -18,6 +18,8 @@ type RideSelectionSheetProps = {
   bookingStatus: BookingStatus;
   onBookRide: () => void;
   driver: DriverProfile;
+  routeSummary: string;
+  isRouteReady: boolean;
 };
 
 export function RideSelectionSheet({
@@ -29,10 +31,13 @@ export function RideSelectionSheet({
   bookingStatus,
   onBookRide,
   driver,
+  routeSummary,
+  isRouteReady,
 }: RideSelectionSheetProps) {
   const selectedRide =
     rides.find((ride) => ride.id === selectedRideId) ?? rides[0];
   const isBookingInFlight = bookingStatus === "loading";
+  const isBookButtonDisabled = isBookingInFlight || !isRouteReady;
 
   return (
     <section className="ride-sheet-shell">
@@ -42,6 +47,10 @@ export function RideSelectionSheet({
             <h2 className="ride-sheet-title">Select Ride</h2>
             <p className="ride-sheet-subtitle">
               Recommended for your carbon goals
+            </p>
+            <p className="ride-sheet-route-meta">
+              <MaterialSymbol name="route" className="ride-sheet-route-icon" />
+              {routeSummary}
             </p>
           </div>
 
@@ -77,15 +86,23 @@ export function RideSelectionSheet({
             type="button"
             className="book-ride-button"
             onClick={onBookRide}
-            disabled={isBookingInFlight}
+            disabled={isBookButtonDisabled}
           >
-            {bookingStatus === "loading"
+            {!isRouteReady
+              ? "Set route first"
+              : bookingStatus === "loading"
               ? "Booking..."
               : bookingStatus === "confirmed"
                 ? `${selectedRide.name} booked`
                 : `Book ${selectedRide.name}`}
           </button>
         </footer>
+
+        <p className="ride-sheet-validation" aria-live="polite">
+          {isRouteReady
+            ? "Trip ready. Select your ride and confirm booking."
+            : "Enter a valid pickup and destination to unlock live fares."}
+        </p>
       </div>
     </section>
   );

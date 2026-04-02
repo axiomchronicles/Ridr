@@ -24,6 +24,19 @@ Install the dependencies:
 npm install
 ```
 
+Configure Google Maps API access for the booking map experience:
+
+```bash
+cp .env.example .env
+```
+
+Set `VITE_GOOGLE_MAPS_API_KEY` in `.env` with a browser key that has these APIs enabled:
+
+- Maps JavaScript API
+- Directions API
+- Geocoding API
+- Places API
+
 ### Development
 
 Start the development server with HMR:

@@ -7,6 +7,12 @@ type RideOptionCardProps = {
   onSelect: (rideId: RideOption["id"]) => void;
 };
 
+const inrFormatter = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0,
+});
+
 export function RideOptionCard({
   ride,
   isSelected,
@@ -37,7 +43,7 @@ export function RideOptionCard({
           className="ride-option-head-icon"
           filled={ride.id === "eco"}
         />
-        <strong className="ride-option-price">${ride.price.toFixed(2)}</strong>
+        <strong className="ride-option-price">{inrFormatter.format(ride.price)}</strong>
       </header>
 
       <div className="ride-option-copy">

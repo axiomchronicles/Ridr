@@ -1,11 +1,21 @@
-import type { DriverProfile, RideOption } from "./booking-flow.types";
+import type { DriverProfile, RideId, RideOption } from "./booking-flow.types";
+
+type RidePricingProfile = {
+  baseFare: number;
+  perMile: number;
+  perMinute: number;
+  minFare: number;
+  waitBufferMinutes: number;
+  etaSpeedFactor: number;
+  co2SavingsPerMile: number;
+};
 
 export const rideOptions: RideOption[] = [
   {
     id: "standard",
     name: "Standard",
     description: "Swift, private journey",
-    price: 24.5,
+    price: 260,
     etaMinutes: 4,
     icon: "directions_car",
     accent: "neutral",
@@ -14,7 +24,7 @@ export const rideOptions: RideOption[] = [
     id: "eco",
     name: "Ridr Eco",
     description: "100% Electric vehicles only",
-    price: 18.2,
+    price: 220,
     etaMinutes: 2,
     icon: "eco",
     accent: "secondary",
@@ -25,16 +35,46 @@ export const rideOptions: RideOption[] = [
     id: "carpool",
     name: "Ridr Carpool",
     description: "Share with 1 other passenger",
-    price: 12.5,
+    price: 180,
     etaMinutes: 7,
     icon: "group",
     accent: "tertiary",
-    savingsLabel: "Saves you $12.50",
+    savingsLabel: "Saves you \u20b980",
   },
 ];
 
-export const defaultPickup = "Current Location: 101 Market St";
-export const defaultDestination = "Salesforce Tower";
+export const ridePricingProfiles: Record<RideId, RidePricingProfile> = {
+  standard: {
+    baseFare: 65,
+    perMile: 24,
+    perMinute: 4.5,
+    minFare: 110,
+    waitBufferMinutes: 2,
+    etaSpeedFactor: 10,
+    co2SavingsPerMile: 0.35,
+  },
+  eco: {
+    baseFare: 55,
+    perMile: 20,
+    perMinute: 3.8,
+    minFare: 95,
+    waitBufferMinutes: 1,
+    etaSpeedFactor: 9,
+    co2SavingsPerMile: 0.72,
+  },
+  carpool: {
+    baseFare: 45,
+    perMile: 16,
+    perMinute: 3.2,
+    minFare: 80,
+    waitBufferMinutes: 4,
+    etaSpeedFactor: 8,
+    co2SavingsPerMile: 1.05,
+  },
+};
+
+export const defaultPickup = "";
+export const defaultDestination = "";
 
 export const primaryDriver: DriverProfile = {
   name: "Sarah",
