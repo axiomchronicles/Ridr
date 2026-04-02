@@ -1,15 +1,265 @@
-@import "tailwindcss";
+:root {
+  color-scheme: light;
+  --font-headline: "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+  --font-body: "Inter", "Segoe UI", sans-serif;
+  --font-label: "Inter", "Segoe UI", sans-serif;
+  --top-nav-height: 5rem;
+  --surface-background: #f9f9f9;
+  --surface-panel: rgba(255, 255, 255, 0.82);
+  --surface-muted: #f3f3f3;
+  --surface-elevated: #ffffff;
+  --surface-deep: #e8e8e8;
+  --outline-ghost: rgba(188, 202, 190, 0.24);
+  --text-primary: #1a1c1c;
+  --text-muted: #6e7478;
+  --secondary: #006d43;
+  --secondary-strong: #005232;
+  --tertiary: #1b6d24;
+  --secondary-soft-bg: rgba(117, 248, 179, 0.32);
+  --shadow-soft: 0 24px 64px -22px rgba(20, 29, 25, 0.22);
+  --shadow-hard: 0 -20px 50px -12px rgba(0, 0, 0, 0.11);
+}
 
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+* {
+  box-sizing: border-box;
 }
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
+  margin: 0;
+  min-height: 100%;
+  padding: 0;
+  background: var(--surface-background);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
 
-  @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
+body {
+  line-height: 1.35;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.material-symbol {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 1.25rem;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ridr-top-nav {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--top-nav-height);
+  padding: 0 1.1rem;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 32px 64px -12px rgba(0, 0, 0, 0.04);
+}
+
+.ridr-top-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+
+.ridr-brand {
+  font-family: var(--font-headline);
+  font-size: 2.05rem;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  color: #0f5f3a;
+}
+
+.ridr-top-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.ridr-nav-link {
+  position: relative;
+  font-family: var(--font-headline);
+  font-size: 1.09rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #697079;
+  transition: color 180ms ease;
+}
+
+.ridr-nav-link:hover,
+.ridr-nav-link-active {
+  color: var(--secondary);
+}
+
+.ridr-nav-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -0.38rem;
+  width: 100%;
+  height: 2px;
+  border-radius: 99px;
+  background: var(--secondary);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 200ms ease;
+}
+
+.ridr-nav-link:hover::after,
+.ridr-nav-link-active::after {
+  transform: scaleX(1);
+}
+
+.ridr-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ridr-icon-button {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background-color 180ms ease;
+}
+
+.ridr-icon-button:hover {
+  background: rgba(232, 232, 232, 0.78);
+}
+
+.ridr-icon-muted {
+  color: #6d737c;
+}
+
+.ridr-icon-secondary {
+  color: var(--secondary);
+}
+
+.ridr-profile-avatar-shell {
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 10px 18px -12px rgba(0, 0, 0, 0.5);
+}
+
+.ridr-profile-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ridr-book-now {
+  margin-left: 0.2rem;
+  border-radius: 0.75rem;
+  padding: 0.63rem 1.1rem;
+  background: var(--secondary);
+  color: #ffffff;
+  font-family: var(--font-headline);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  transition: background-color 180ms ease;
+}
+
+.ridr-book-now:hover {
+  background: var(--secondary-strong);
+}
+
+.ridr-mobile-nav {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 90;
+  display: none;
+  height: 4.6rem;
+  align-items: center;
+  justify-content: space-around;
+  background: rgba(255, 255, 255, 0.94);
+  border-top: 1px solid var(--outline-ghost);
+  backdrop-filter: blur(10px);
+}
+
+.ridr-mobile-nav-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  color: #737a82;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ridr-mobile-nav-link-active {
+  color: var(--secondary);
+}
+
+@media (max-width: 980px) {
+  .ridr-top-nav-links {
+    display: none;
+  }
+
+  .ridr-book-now {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .ridr-mobile-nav {
+    display: flex;
+  }
+}
+
+@media (max-width: 560px) {
+  :root {
+    --top-nav-height: 4.45rem;
+  }
+
+  .ridr-top-nav {
+    padding: 0 0.75rem;
+  }
+
+  .ridr-brand {
+    font-size: 1.75rem;
   }
 }
