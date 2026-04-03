@@ -13,3 +13,5 @@ server/ridr.db
 
 # TLS certificate material
 /nginx/ssl/*.pem
+/nginx/letsencrypt/*
+!/nginx/letsencrypt/.gitkeep

@@ -118,6 +118,24 @@ cp /etc/letsencrypt/live/ecoridr.tubox.cloud/privkey.pem nginx/ssl/privkey.pem
 ./nginx/ssl/generate-self-signed.sh
 ```
 
+- For production (trusted SSL), issue a Let's Encrypt certificate:
+
+```bash
+./scripts/issue-letsencrypt-cert.sh ecoridr.tubox.cloud your-email@example.com
+```
+
+- Renew certificate (recommended via cron):
+
+```bash
+./scripts/renew-letsencrypt-cert.sh ecoridr.tubox.cloud
+```
+
+- If you deploy with `docker-compose.server.yml`, run with:
+
+```bash
+COMPOSE_FILE=docker-compose.server.yml ./scripts/issue-letsencrypt-cert.sh ecoridr.tubox.cloud your-email@example.com
+```
+
 - Start the stack and access the app at `https://ecoridr.tubox.cloud`.
 - If you need ACME HTTP-01 challenge support, challenge files are served from `nginx/www/`.
 
