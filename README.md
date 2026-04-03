@@ -75,37 +75,52 @@ npm run build
 
 ### Docker Deployment
 
-To containerize both frontend and backend with Docker Compose:
+This repository now includes two Docker Compose deployment modes:
+
+- `docker-compose.yml` - builds frontend/backend locally and runs Nginx as the public reverse proxy.
+- `docker-compose.server.yml` - pulls prebuilt frontend/backend images on a server and runs Nginx as the public reverse proxy.
+
+Nginx is the only public entrypoint, so the app is available at `http://localhost` by default.
+
+#### Local Production-Like Build (build images from source)
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.yml up --build -d
 ```
 
-Frontend will be available at `http://localhost:3000` and backend at `http://localhost:8000`.
-
-To run detached:
+Optional environment overrides before build/run:
 
 ```bash
-docker compose up --build -d
-```
-
-To stop containers:
-
-```bash
-docker compose down
-```
-
-To remove containers and backend data volume:
-
-```bash
-docker compose down -v
-```
-
-If you need Google Maps in container builds, export your key before building:
-
-```bash
+export VITE_API_BASE_URL=/api/v1
 export VITE_GOOGLE_MAPS_API_KEY=your_key_here
-docker compose up --build
+export JWT_SECRET_KEY=replace-with-a-strong-secret
+export NGINX_PORT=80
+```
+
+To stop:
+
+```bash
+docker compose -f docker-compose.yml down
+```
+
+To stop and remove backend data volume:
+
+```bash
+docker compose -f docker-compose.yml down -v
+```
+
+#### Server Deployment (pull frontend/backend images)
+
+Deploy by building and starting containers directly on the server:
+
+```bash
+docker compose -f docker-compose.server.yml up --build -d
+```
+
+Stop server deployment:
+
+```bash
+docker compose -f docker-compose.server.yml down
 ```
 
 If you only want frontend as a standalone image:
