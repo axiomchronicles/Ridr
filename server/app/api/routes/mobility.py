@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 from math import cos, radians, sin
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
@@ -15,7 +16,7 @@ from app.api.deps import get_current_user
 from app.core.security import decode_access_token
 from app.db.seed_mobility import seed_mobility_data
 from app.db.session import SessionLocal, get_db
-from app.models.mobility import CommuteProfile, RideChatMessage, RideMatch, VehicleLocation
+from app.models.mobility import CommuteProfile, RideBookingSession, RideChatMessage, RideLobbyMessage, RideMatch, VehicleLocation
 from app.models.user import User
 from app.schemas.mobility import (
     ChatMessageCreate,
@@ -30,6 +31,11 @@ from app.schemas.mobility import (
     NearbyVehiclesResponse,
     RideBookingRequest,
     RideBookingResponse,
+    RideBookingSessionStateResponse,
+    RideLobbyMessageCreate,
+    RideLobbyMessageRead,
+    RideLobbyParticipant,
+    RideMeetingLobbySnapshot,
     RideSummary,
     RideTransactionState,
     RideTransactionUpdateRequest,
@@ -37,11 +43,14 @@ from app.schemas.mobility import (
     VehicleTrackingUpdate,
 )
 from app.services.matching import compute_match_score, haversine_km
-from app.services.realtime import ride_chat_hub, ride_tracking_hub, vehicle_stream_hub
+from app.services.realtime import ride_chat_hub, ride_lobby_hub, ride_tracking_hub, vehicle_stream_hub
 
 router = APIRouter(prefix="/mobility", tags=["mobility"])
 
 AUTO_ACCEPT_DELAY_SECONDS = 18
+MEETING_LOBBY_RADIUS_KM = 3.5
+ACTIVE_RIDE_STATUSES = ("matched", "pending_acceptance", "accepted", "in_progress")
+TERMINAL_RIDE_STATUSES = ("cancelled", "completed")
 
 
 def _as_utc(timestamp: datetime | None) -> datetime:
@@ -70,9 +79,24 @@ def _build_transaction_state(ride: RideMatch, current_user: User) -> RideTransac
     is_rider = current_user.id == ride.rider_id
     is_driver = current_user.id == ride.driver_id
 
-    can_cancel = status in {"pending_acceptance", "accepted"} and (is_rider or is_driver)
-    can_modify = status == "pending_acceptance" and is_rider
-    can_accept = status == "pending_acceptance" and is_driver
+    can_cancel = status in {"matched", "pending_acceptance", "accepted"} and (is_rider or is_driver)
+    can_modify = status in {"matched", "pending_acceptance"} and is_rider
+    can_accept = status in {"matched", "pending_acceptance"} and is_driver
+
+    if status == "matched":
+        now_utc = datetime.now(timezone.utc)
+        created_at = _as_utc(ride.created_at)
+        elapsed_seconds = max(0, int((now_utc - created_at).total_seconds()))
+        remaining_seconds = max(0, AUTO_ACCEPT_DELAY_SECONDS - elapsed_seconds)
+        message = "Ride matched. Confirm, modify, or cancel this request."
+        return RideTransactionState(
+            status="matched",
+            can_cancel=can_cancel,
+            can_modify=can_modify,
+            can_accept=can_accept,
+            message=message,
+            estimated_accept_seconds=remaining_seconds,
+        )
 
     if status == "pending_acceptance":
         now_utc = datetime.now(timezone.utc)
@@ -135,7 +159,7 @@ def _build_transaction_state(ride: RideMatch, current_user: User) -> RideTransac
 
 
 def _maybe_auto_accept_ride(db: Session, ride: RideMatch) -> bool:
-    if ride.status != "pending_acceptance" or ride.driver_id is None:
+    if ride.status not in {"matched", "pending_acceptance"} or ride.driver_id is None:
         return False
 
     created_at = _as_utc(ride.created_at)
@@ -178,6 +202,417 @@ def _build_ride_summary(db: Session, ride: RideMatch, current_user: User) -> Rid
         updated_at=_as_utc(ride.updated_at),
         transaction=_build_transaction_state(ride, current_user),
     )
+
+
+def _build_booking_response_from_ride(
+    db: Session,
+    ride: RideMatch,
+    current_user: User,
+    *,
+    booking_session_state: Literal["created", "existing"],
+    booking_session_message: str,
+) -> RideBookingResponse:
+    matched_user_id = ride.driver_id if current_user.id == ride.rider_id else ride.rider_id
+    if matched_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ride session has no matched counterpart",
+        )
+
+    matched_user = db.scalar(select(User).where(User.id == matched_user_id))
+    if matched_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Matched user no longer available",
+        )
+
+    matched_user_name = f"{matched_user.first_name} {matched_user.last_name}".strip() or "Matched user"
+
+    return RideBookingResponse(
+        ride_id=ride.ride_uid,
+        status=ride.status,
+        booking_session_state=booking_session_state,
+        booking_session_message=booking_session_message,
+        matched_user_id=matched_user_id,
+        matched_user_name=matched_user_name,
+        matched_role="driver" if current_user.id == ride.rider_id else "rider",  # type: ignore[arg-type]
+        score=ride.total_score,
+        reasons=ride.score_reasons or ["Ride booking session is active."],
+        breakdown=MatchScoreBreakdown(
+            route=ride.route_score,
+            time=ride.time_score,
+            role=ride.role_score,
+            preference=ride.preference_score,
+            total=ride.total_score,
+        ),
+    )
+
+
+def _resolve_active_ride_for_rider(db: Session, rider_id: int) -> RideMatch | None:
+    return db.scalar(
+        select(RideMatch)
+        .where(
+            RideMatch.rider_id == rider_id,
+            RideMatch.status.in_(ACTIVE_RIDE_STATUSES),
+        )
+        .order_by(RideMatch.updated_at.desc(), RideMatch.created_at.desc())
+    )
+
+
+def _upsert_booking_session(
+    db: Session,
+    *,
+    rider_id: int,
+    ride: RideMatch,
+) -> RideBookingSession:
+    session_row = db.scalar(select(RideBookingSession).where(RideBookingSession.user_id == rider_id))
+    now_utc = datetime.now(timezone.utc)
+
+    if session_row is None:
+        session_row = RideBookingSession(user_id=rider_id)
+        db.add(session_row)
+
+    if not session_row.is_active or session_row.ride_id != ride.id:
+        session_row.started_at = now_utc
+
+    session_row.ride_id = ride.id
+    session_row.is_active = True
+    session_row.ended_at = None
+    session_row.closed_reason = None
+    return session_row
+
+
+def _close_booking_session(
+    db: Session,
+    *,
+    rider_id: int | None,
+    ride_id: int | None = None,
+    reason: str,
+) -> None:
+    if rider_id is None:
+        return
+
+    session_row = db.scalar(select(RideBookingSession).where(RideBookingSession.user_id == rider_id))
+    if session_row is None or not session_row.is_active:
+        return
+
+    if ride_id is not None and session_row.ride_id is not None and session_row.ride_id != ride_id:
+        return
+
+    session_row.is_active = False
+    session_row.ended_at = datetime.now(timezone.utc)
+    session_row.closed_reason = reason
+
+
+def _sync_booking_session_for_ride(db: Session, ride: RideMatch) -> bool:
+    if ride.rider_id is None:
+        return False
+
+    if ride.status in ACTIVE_RIDE_STATUSES:
+        _upsert_booking_session(
+            db,
+            rider_id=ride.rider_id,
+            ride=ride,
+        )
+        return True
+
+    if ride.status in TERMINAL_RIDE_STATUSES:
+        _close_booking_session(
+            db,
+            rider_id=ride.rider_id,
+            ride_id=ride.id,
+            reason=ride.status,
+        )
+        return True
+
+    return False
+
+
+def _resolve_active_ride_session_for_rider(db: Session, rider_id: int) -> RideMatch | None:
+    active_ride = _resolve_active_ride_for_rider(db, rider_id)
+    if active_ride is not None:
+        _upsert_booking_session(
+            db,
+            rider_id=rider_id,
+            ride=active_ride,
+        )
+        return active_ride
+
+    _close_booking_session(
+        db,
+        rider_id=rider_id,
+        reason="stale",
+    )
+    return None
+
+
+def _normalize_lobby_radius(radius_km: float) -> float:
+    return max(0.5, min(radius_km, 20.0))
+
+
+def _build_lobby_cluster_key(
+    anchor_role: str,
+    anchor_user_id: int,
+    radius_km: float,
+) -> str:
+    return f"{anchor_role}:{anchor_user_id}:r:{int(round(radius_km * 10))}"
+
+
+def _resolve_lobby_anchor_user(
+    ride: RideMatch,
+    current_user: User,
+) -> tuple[str, int]:
+    # In rider-first booking flow, driver is the shared anchor across many riders.
+    if ride.driver_id is not None:
+        return "driver", ride.driver_id
+
+    if ride.rider_id is not None:
+        return "rider", ride.rider_id
+
+    return "user", current_user.id
+
+
+def _format_user_name(user: User | None, fallback: str = "Unknown") -> str:
+    if user is None:
+        return fallback
+
+    full_name = f"{user.first_name} {user.last_name}".strip()
+    return full_name if full_name else fallback
+
+
+def _lobby_message_to_read(
+    message: RideLobbyMessage,
+    users_by_id: dict[int, User],
+    ride_uid_by_id: dict[int, str],
+) -> RideLobbyMessageRead:
+    sender_user = users_by_id.get(message.sender_id) if message.sender_id is not None else None
+    sender_name = (
+        _format_user_name(sender_user)
+        if sender_user is not None
+        else ("System" if message.sender_role == "system" else None)
+    )
+
+    return RideLobbyMessageRead(
+        id=message.id,
+        ride_id=ride_uid_by_id.get(message.ride_id) if message.ride_id is not None else None,
+        rider_id=message.rider_id,
+        cluster_key=message.cluster_key,
+        sender_id=message.sender_id,
+        sender_role=message.sender_role,
+        sender_name=sender_name,
+        text=message.body,
+        created_at=message.created_at,
+    )
+
+
+def _resolve_lobby_rides(
+    db: Session,
+    ride: RideMatch,
+    radius_km: float,
+    *,
+    anchor_role: str,
+    anchor_user_id: int,
+) -> list[RideMatch]:
+    if anchor_role not in {"driver", "rider"}:
+        return [ride]
+
+    if anchor_role == "driver":
+        anchor_clause = RideMatch.driver_id == anchor_user_id
+    else:
+        anchor_clause = RideMatch.rider_id == anchor_user_id
+
+    candidate_rides = db.scalars(
+        select(RideMatch).where(
+            anchor_clause,
+            RideMatch.status.in_(ACTIVE_RIDE_STATUSES),
+        )
+    ).all()
+
+    lobby_rides = [
+        candidate
+        for candidate in candidate_rides
+        if haversine_km(
+            ride.pickup_lat,
+            ride.pickup_lng,
+            candidate.pickup_lat,
+            candidate.pickup_lng,
+        )
+        <= radius_km
+    ]
+
+    if not any(candidate.id == ride.id for candidate in lobby_rides):
+        lobby_rides.append(ride)
+
+    lobby_rides.sort(key=lambda entry: _as_utc(entry.created_at))
+    return lobby_rides
+
+
+def _build_meeting_lobby_snapshot(
+    db: Session,
+    ride: RideMatch,
+    current_user: User,
+    *,
+    radius_km: float,
+) -> RideMeetingLobbySnapshot:
+    normalized_radius = _normalize_lobby_radius(radius_km)
+    anchor_role, anchor_user_id = _resolve_lobby_anchor_user(ride, current_user)
+    lobby_rides = _resolve_lobby_rides(
+        db,
+        ride,
+        normalized_radius,
+        anchor_role=anchor_role,
+        anchor_user_id=anchor_user_id,
+    )
+
+    center_lat = sum(entry.pickup_lat for entry in lobby_rides) / len(lobby_rides)
+    center_lng = sum(entry.pickup_lng for entry in lobby_rides) / len(lobby_rides)
+
+    cluster_key = _build_lobby_cluster_key(
+        anchor_role,
+        anchor_user_id,
+        normalized_radius,
+    )
+
+    ride_uid_by_id = {entry.id: entry.ride_uid for entry in lobby_rides}
+
+    user_ids: set[int] = set()
+    commute_ids: set[int] = set()
+    for entry in lobby_rides:
+        if entry.rider_id is not None:
+            user_ids.add(entry.rider_id)
+        if entry.driver_id is not None:
+            user_ids.add(entry.driver_id)
+        if entry.rider_commute_id is not None:
+            commute_ids.add(entry.rider_commute_id)
+        if entry.driver_commute_id is not None:
+            commute_ids.add(entry.driver_commute_id)
+
+    users_by_id = {
+        user.id: user
+        for user in db.scalars(select(User).where(User.id.in_(user_ids))).all()
+    }
+    commutes_by_id = {
+        commute.id: commute
+        for commute in db.scalars(select(CommuteProfile).where(CommuteProfile.id.in_(commute_ids))).all()
+    }
+
+    participants: list[RideLobbyParticipant] = []
+    seen_user_ids: set[int] = set()
+
+    for entry in lobby_rides:
+        if entry.rider_id is not None and entry.rider_id not in seen_user_ids:
+            rider_user = users_by_id.get(entry.rider_id)
+            rider_lat = entry.pickup_lat
+            rider_lng = entry.pickup_lng
+            participants.append(
+                RideLobbyParticipant(
+                    user_id=entry.rider_id,
+                    name=_format_user_name(rider_user, "Rider"),
+                    role="rider",
+                    ride_id=entry.ride_uid,
+                    ride_status=entry.status,
+                    distance_km=round(
+                        haversine_km(
+                            ride.pickup_lat,
+                            ride.pickup_lng,
+                            rider_lat,
+                            rider_lng,
+                        ),
+                        2,
+                    ),
+                    vehicle_name=None,
+                    lat=rider_lat,
+                    lng=rider_lng,
+                    is_current_user=entry.rider_id == current_user.id,
+                )
+            )
+            seen_user_ids.add(entry.rider_id)
+
+        if entry.driver_id is not None and entry.driver_id not in seen_user_ids:
+            driver_user = users_by_id.get(entry.driver_id)
+            driver_commute = (
+                commutes_by_id.get(entry.driver_commute_id)
+                if entry.driver_commute_id is not None
+                else None
+            )
+            driver_lat = driver_commute.origin_lat if driver_commute is not None else entry.pickup_lat
+            driver_lng = driver_commute.origin_lng if driver_commute is not None else entry.pickup_lng
+            participants.append(
+                RideLobbyParticipant(
+                    user_id=entry.driver_id,
+                    name=_format_user_name(driver_user, "Driver"),
+                    role="driver",
+                    ride_id=entry.ride_uid,
+                    ride_status=entry.status,
+                    distance_km=round(
+                        haversine_km(
+                            ride.pickup_lat,
+                            ride.pickup_lng,
+                            driver_lat,
+                            driver_lng,
+                        ),
+                        2,
+                    ),
+                    vehicle_name=driver_commute.vehicle_name if driver_commute is not None else None,
+                    lat=driver_lat,
+                    lng=driver_lng,
+                    is_current_user=entry.driver_id == current_user.id,
+                )
+            )
+            seen_user_ids.add(entry.driver_id)
+
+    participants.sort(key=lambda item: (item.distance_km, item.role != "rider"))
+
+    recent_messages = db.scalars(
+        select(RideLobbyMessage)
+        .where(RideLobbyMessage.cluster_key == cluster_key)
+        .order_by(RideLobbyMessage.created_at.desc())
+        .limit(120)
+    ).all()
+    recent_messages.reverse()
+
+    messages = [
+        _lobby_message_to_read(message, users_by_id, ride_uid_by_id)
+        for message in recent_messages
+    ]
+
+    return RideMeetingLobbySnapshot(
+        ride_id=ride.ride_uid,
+        cluster_key=cluster_key,
+        radius_km=normalized_radius,
+        center={"lat": center_lat, "lng": center_lng},
+        participants=participants,
+        messages=messages,
+    )
+
+
+def _create_lobby_message(
+    db: Session,
+    *,
+    ride: RideMatch,
+    cluster_key: str,
+    sender_id: int | None,
+    sender_role: str,
+    text: str,
+) -> RideLobbyMessage:
+    if ride.rider_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ride lobby is unavailable for this ride",
+        )
+
+    message = RideLobbyMessage(
+        ride_id=ride.id,
+        rider_id=ride.rider_id,
+        cluster_key=cluster_key,
+        sender_id=sender_id,
+        sender_role=sender_role,
+        body=text,
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    return message
 
 
 def _extract_token_from_websocket(websocket: WebSocket) -> str | None:
@@ -590,6 +1025,19 @@ def book_ride_match(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> RideBookingResponse:
+    existing_ride = _resolve_active_ride_session_for_rider(db, current_user.id)
+    if existing_ride is not None:
+        db.commit()
+        return _build_booking_response_from_ride(
+            db,
+            existing_ride,
+            current_user,
+            booking_session_state="existing",
+            booking_session_message=(
+                "You already have an ongoing ride session. Redirecting to your active ride."
+            ),
+        )
+
     requester_profile, _ = _upsert_commute_profile(db, current_user.id, payload.commute)
     matches = _build_match_candidates(
         db,
@@ -723,17 +1171,47 @@ def book_ride_match(
         )
     )
 
+    _upsert_booking_session(
+        db,
+        rider_id=rider_id,
+        ride=ride,
+    )
+
     db.commit()
 
-    return RideBookingResponse(
-        ride_id=ride_uid,
-        status=ride.status,
-        matched_user_id=partner_user.id,
-        matched_user_name=f"{partner_user.first_name} {partner_user.last_name}".strip(),
-        matched_role=selected_match.role,
-        score=selected_match.score,
-        reasons=selected_match.reasons,
-        breakdown=selected_match.breakdown,
+    return _build_booking_response_from_ride(
+        db,
+        ride,
+        current_user,
+        booking_session_state="created",
+        booking_session_message="Ride booking session created and locked until ride is cancelled or completed.",
+    )
+
+
+@router.get("/rides/booking-session", response_model=RideBookingSessionStateResponse)
+def get_active_ride_booking_session(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RideBookingSessionStateResponse:
+    active_ride = _resolve_active_ride_session_for_rider(db, current_user.id)
+    if active_ride is None:
+        db.commit()
+        return RideBookingSessionStateResponse(
+            has_active_session=False,
+            message="No active ride booking session.",
+        )
+
+    ride_summary = _build_ride_summary(db, active_ride, current_user)
+    db.commit()
+    return RideBookingSessionStateResponse(
+        has_active_session=True,
+        ride_id=ride_summary.ride_id,
+        ride_status=ride_summary.status,
+        matched_user_name=ride_summary.matched_user_name,
+        pickup_label=ride_summary.pickup_label,
+        destination_label=ride_summary.destination_label,
+        score=ride_summary.score,
+        message="Active ride booking session found.",
     )
 
 
@@ -744,7 +1222,9 @@ def get_ride_summary(
     current_user: User = Depends(get_current_user),
 ) -> RideSummary:
     ride = _resolve_ride_for_user(db, ride_uid, current_user.id)
-    if _maybe_auto_accept_ride(db, ride):
+    ride_status_changed = _maybe_auto_accept_ride(db, ride)
+    session_changed = _sync_booking_session_for_ride(db, ride)
+    if ride_status_changed or session_changed:
         db.commit()
         db.refresh(ride)
 
@@ -776,9 +1256,9 @@ def update_ride_transaction(
         if current_user.id != ride.rider_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only rider can modify pending transaction details",
+                detail="Only rider can modify transaction details while awaiting acceptance",
             )
-        if ride.status != "pending_acceptance":
+        if ride.status not in {"matched", "pending_acceptance"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Ride can only be modified while waiting for acceptance",
@@ -855,7 +1335,7 @@ def update_ride_transaction(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only assigned driver can accept this transaction",
             )
-        if ride.status != "pending_acceptance":
+        if ride.status not in {"matched", "pending_acceptance"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Ride is not awaiting acceptance",
@@ -864,8 +1344,21 @@ def update_ride_transaction(
         ride.status = "accepted"
         _append_system_message(db, ride.id, "Driver accepted the ride request.")
 
+    elif payload.action == "complete":
+        if ride.status not in {"accepted", "in_progress"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only active rides can be completed",
+            )
+
+        actor = "rider" if current_user.id == ride.rider_id else "driver"
+        ride.status = "completed"
+        _append_system_message(db, ride.id, f"Ride marked as completed by {actor}.")
+
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported transaction action")
+
+    _sync_booking_session_for_ride(db, ride)
 
     db.commit()
     db.refresh(ride)
@@ -914,6 +1407,79 @@ async def post_ride_chat_message(
     )
 
     return message
+
+
+@router.get("/rides/{ride_uid}/meeting-lobby", response_model=RideMeetingLobbySnapshot)
+def get_ride_meeting_lobby(
+    ride_uid: str,
+    radius_km: float = Query(default=MEETING_LOBBY_RADIUS_KM, gt=0, le=20),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RideMeetingLobbySnapshot:
+    ride = _resolve_ride_for_user(db, ride_uid, current_user.id)
+    snapshot = _build_meeting_lobby_snapshot(
+        db,
+        ride,
+        current_user,
+        radius_km=radius_km,
+    )
+
+    if not any(participant.user_id == current_user.id for participant in snapshot.participants):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Meeting lobby access denied",
+        )
+
+    return snapshot
+
+
+@router.post("/rides/{ride_uid}/meeting-lobby/messages", response_model=RideLobbyMessageRead)
+async def post_ride_meeting_lobby_message(
+    ride_uid: str,
+    payload: RideLobbyMessageCreate,
+    radius_km: float = Query(default=MEETING_LOBBY_RADIUS_KM, gt=0, le=20),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RideLobbyMessageRead:
+    ride = _resolve_ride_for_user(db, ride_uid, current_user.id)
+    snapshot = _build_meeting_lobby_snapshot(
+        db,
+        ride,
+        current_user,
+        radius_km=radius_km,
+    )
+
+    if not any(participant.user_id == current_user.id for participant in snapshot.participants):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Meeting lobby access denied",
+        )
+
+    sender_role = "rider" if current_user.id == ride.rider_id else "driver"
+    message_row = _create_lobby_message(
+        db,
+        ride=ride,
+        cluster_key=snapshot.cluster_key,
+        sender_id=current_user.id,
+        sender_role=sender_role,
+        text=payload.text.strip(),
+    )
+
+    message_read = _lobby_message_to_read(
+        message_row,
+        users_by_id={current_user.id: current_user},
+        ride_uid_by_id={ride.id: ride.ride_uid},
+    )
+
+    await ride_lobby_hub.broadcast(
+        snapshot.cluster_key,
+        {
+            "type": "lobby_message",
+            "message": message_read.model_dump(mode="json"),
+        },
+    )
+
+    return message_read
 
 
 @router.post("/rides/{ride_uid}/tracking", response_model=VehicleMarker)
@@ -1029,6 +1595,86 @@ async def ride_chat_websocket(websocket: WebSocket, ride_uid: str) -> None:
         pass
     finally:
         await ride_chat_hub.disconnect(ride_uid, websocket)
+        db.close()
+
+
+@router.websocket("/rides/{ride_uid}/meeting-lobby/ws")
+async def ride_meeting_lobby_websocket(websocket: WebSocket, ride_uid: str) -> None:
+    db = SessionLocal()
+    cluster_key: str | None = None
+    try:
+        user = _resolve_user_from_token(db, _extract_token_from_websocket(websocket))
+        ride = _resolve_ride_for_user(db, ride_uid, user.id)
+
+        try:
+            radius_km = float(websocket.query_params.get("radius_km", str(MEETING_LOBBY_RADIUS_KM)))
+        except (TypeError, ValueError):
+            radius_km = MEETING_LOBBY_RADIUS_KM
+        snapshot = _build_meeting_lobby_snapshot(
+            db,
+            ride,
+            user,
+            radius_km=radius_km,
+        )
+
+        if not any(participant.user_id == user.id for participant in snapshot.participants):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Meeting lobby access denied",
+            )
+
+        cluster_key = snapshot.cluster_key
+        await ride_lobby_hub.connect(cluster_key, websocket)
+        await websocket.send_json({"type": "ack", "message": "Meeting lobby connected"})
+        await websocket.send_json(
+            {
+                "type": "lobby_snapshot",
+                "snapshot": snapshot.model_dump(mode="json"),
+            }
+        )
+
+        while True:
+            payload = await websocket.receive_json()
+            message_type = str(payload.get("type", "")).strip()
+            if message_type != "lobby_message":
+                await websocket.send_json({"type": "error", "message": "Unsupported message type"})
+                continue
+
+            text = str(payload.get("text", "")).strip()
+            if not text:
+                await websocket.send_json({"type": "error", "message": "Message text is required"})
+                continue
+
+            sender_role = "rider" if user.id == ride.rider_id else "driver"
+            message_row = _create_lobby_message(
+                db,
+                ride=ride,
+                cluster_key=cluster_key,
+                sender_id=user.id,
+                sender_role=sender_role,
+                text=text,
+            )
+
+            message_read = _lobby_message_to_read(
+                message_row,
+                users_by_id={user.id: user},
+                ride_uid_by_id={ride.id: ride.ride_uid},
+            )
+
+            await ride_lobby_hub.broadcast(
+                cluster_key,
+                {
+                    "type": "lobby_message",
+                    "message": message_read.model_dump(mode="json"),
+                },
+            )
+    except HTTPException:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if cluster_key is not None:
+            await ride_lobby_hub.disconnect(cluster_key, websocket)
         db.close()
 
 

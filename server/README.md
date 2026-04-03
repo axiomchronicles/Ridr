@@ -40,14 +40,18 @@ env/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir .
 - `GET /api/v1/auth/me` - Get current user (requires Bearer token)
 - `POST /api/v1/mobility/commutes/upsert` - Upsert user commute profile
 - `POST /api/v1/mobility/matches` - Ranked commute matches with explainability
-- `POST /api/v1/mobility/rides/book` - Create pending ride transaction from matched rider/driver
+- `POST /api/v1/mobility/rides/book` - Create ride session or return existing active ride session for rider
+- `GET /api/v1/mobility/rides/booking-session` - Fetch active ride booking session for current rider
 - `GET /api/v1/mobility/rides/{ride_uid}` - Ride summary, transaction state, and action capabilities
-- `PATCH /api/v1/mobility/rides/{ride_uid}/transaction` - Transaction actions: modify, cancel, accept
+- `PATCH /api/v1/mobility/rides/{ride_uid}/transaction` - Transaction actions: modify, cancel, accept, complete
 - `GET /api/v1/mobility/rides/{ride_uid}/chat/messages` - Chat history for a ride
 - `POST /api/v1/mobility/rides/{ride_uid}/chat/messages` - Send a chat message over HTTP
+- `GET /api/v1/mobility/rides/{ride_uid}/meeting-lobby` - Users in same rider/radius coordination lobby
+- `POST /api/v1/mobility/rides/{ride_uid}/meeting-lobby/messages` - Send lobby chat message
 - `POST /api/v1/mobility/rides/{ride_uid}/tracking` - Persist and broadcast location update
 - `GET /api/v1/mobility/vehicles/nearby` - Nearby active drivers for map markers
 - `WS /api/v1/mobility/rides/{ride_uid}/chat/ws` - Live ride chat channel
+- `WS /api/v1/mobility/rides/{ride_uid}/meeting-lobby/ws` - Live same-rider lobby chat channel
 - `WS /api/v1/mobility/rides/{ride_uid}/tracking/ws` - Live ride tracking channel
 - `WS /api/v1/mobility/vehicles/stream/ws` - Nearby vehicle stream for booking map
 

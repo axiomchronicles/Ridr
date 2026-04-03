@@ -20,7 +20,10 @@ import { DemandAlertCard } from "./components/demand-alert-card";
 import { MapCanvas } from "./components/map-canvas";
 import { RideSelectionSheet } from "./components/ride-selection-sheet";
 import { getAccessToken } from "~/features/auth/auth-client";
-import { bookRideMatch } from "~/features/mobility/mobility-client";
+import {
+  bookRideMatch,
+  fetchActiveRideBookingSession,
+} from "~/features/mobility/mobility-client";
 import { RidrMobileNav } from "~/features/shared/components/ridr-mobile-nav";
 import { RidrTopNav } from "~/features/shared/components/ridr-top-nav";
 import "./booking-flow.css";
@@ -84,6 +87,7 @@ export function BookingFareEstimatesPage() {
   const [bookingStatus, setBookingStatus] = useState<BookingStatus>("idle");
   const [routeSnapshot, setRouteSnapshot] =
     useState<RouteSnapshot>(emptyRouteSnapshot);
+  const [isCheckingBookingSession, setIsCheckingBookingSession] = useState(true);
   const [pickupOverridePoint, setPickupOverridePoint] =
     useState<google.maps.LatLngLiteral | null>(null);
   const [locationFetchStatus, setLocationFetchStatus] =
@@ -355,6 +359,118 @@ export function BookingFareEstimatesPage() {
     [dynamicRideOptions, selectedRideId],
   );
 
+  const redirectToFindingRide = useCallback(
+    (args: {
+      rideId: string;
+      matchUser?: string | null;
+      score?: number | null;
+      pickupLabel?: string;
+      destinationLabel?: string;
+    }) => {
+      const nextParams = new URLSearchParams();
+
+      const nextPickup = args.pickupLabel?.trim() || pickup.trim();
+      const nextDestination = args.destinationLabel?.trim() || destination.trim();
+      const selectedImpact = selectedRide.impactLabel?.match(/\d+(?:\.\d+)?/)?.[0] ?? "4.2";
+
+      if (nextPickup) {
+        nextParams.set("pickup", nextPickup);
+      }
+
+      if (nextDestination) {
+        nextParams.set("destination", nextDestination);
+      }
+
+      nextParams.set("ride", selectedRide.name);
+      nextParams.set("fare", inrFormatter.format(selectedRide.price));
+      nextParams.set("eta", `${selectedRide.etaMinutes} min`);
+      nextParams.set("route", routeSummaryText);
+      nextParams.set("impactKg", selectedImpact);
+      nextParams.set("rideId", args.rideId);
+
+      if (args.matchUser?.trim()) {
+        nextParams.set("matchUser", args.matchUser.trim());
+      }
+
+      if (typeof args.score === "number") {
+        nextParams.set("matchScore", String(Math.round(args.score * 100)));
+      }
+
+      if (resolvedPoints) {
+        nextParams.set("pickupLat", String(resolvedPoints.pickup.lat));
+        nextParams.set("pickupLng", String(resolvedPoints.pickup.lng));
+        nextParams.set("destinationLat", String(resolvedPoints.destination.lat));
+        nextParams.set("destinationLng", String(resolvedPoints.destination.lng));
+      }
+
+      const nextSearch = nextParams.toString();
+      navigate(
+        nextSearch
+          ? `/ride/finding-your-ride?${nextSearch}`
+          : "/ride/finding-your-ride",
+        { replace: true },
+      );
+    },
+    [
+      destination,
+      inrFormatter,
+      navigate,
+      pickup,
+      resolvedPoints,
+      routeSummaryText,
+      selectedRide.etaMinutes,
+      selectedRide.impactLabel,
+      selectedRide.name,
+      selectedRide.price,
+    ],
+  );
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      setIsCheckingBookingSession(false);
+      return;
+    }
+    const authToken = token;
+
+    let disposed = false;
+
+    async function checkActiveBookingSession() {
+      try {
+        const activeSession = await fetchActiveRideBookingSession(authToken);
+        if (disposed) {
+          return;
+        }
+
+        if (activeSession.has_active_session && activeSession.ride_id) {
+          setLocationStatusMessage(activeSession.message);
+          redirectToFindingRide({
+            rideId: activeSession.ride_id,
+            matchUser: activeSession.matched_user_name,
+            score: activeSession.score,
+            pickupLabel: activeSession.pickup_label || undefined,
+            destinationLabel: activeSession.destination_label || undefined,
+          });
+          return;
+        }
+      } catch {
+        if (!disposed) {
+          setLocationStatusMessage("Unable to verify active ride session. You can still try booking.");
+        }
+      } finally {
+        if (!disposed) {
+          setIsCheckingBookingSession(false);
+        }
+      }
+    }
+
+    void checkActiveBookingSession();
+
+    return () => {
+      disposed = true;
+    };
+  }, [redirectToFindingRide]);
+
   useEffect(() => {
     return () => {
       if (bookingResetTimerRef.current !== null) {
@@ -364,7 +480,7 @@ export function BookingFareEstimatesPage() {
   }, []);
 
   async function handleBookRide() {
-    if (bookingStatus === "loading" || !isRouteReady) {
+    if (bookingStatus === "loading" || isCheckingBookingSession || !isRouteReady) {
       return;
     }
 
@@ -411,47 +527,21 @@ export function BookingFareEstimatesPage() {
         radius_km: 10,
       });
 
-      setBookingStatus("confirmed");
+      const existingSession = bookingResponse.booking_session_state === "existing";
+      setBookingStatus(existingSession ? "idle" : "confirmed");
       setLocationStatusMessage(
-        `Transaction created with ${bookingResponse.matched_user_name}. Awaiting acceptance (${Math.round(bookingResponse.score * 100)}% compatibility).`,
+        bookingResponse.booking_session_message ||
+          `Transaction created with ${bookingResponse.matched_user_name}. Awaiting acceptance (${Math.round(bookingResponse.score * 100)}% compatibility).`,
       );
 
       bookingResetTimerRef.current = window.setTimeout(() => {
-        const nextParams = new URLSearchParams();
-
-        const trimmedPickup = pickup.trim();
-        const trimmedDestination = destination.trim();
-        const selectedImpact = selectedRide.impactLabel?.match(/\d+(?:\.\d+)?/)?.[0] ?? "4.2";
-
-        if (trimmedPickup) {
-          nextParams.set("pickup", trimmedPickup);
-        }
-
-        if (trimmedDestination) {
-          nextParams.set("destination", trimmedDestination);
-        }
-
-        nextParams.set("ride", selectedRide.name);
-        nextParams.set("fare", inrFormatter.format(selectedRide.price));
-        nextParams.set("eta", `${selectedRide.etaMinutes} min`);
-        nextParams.set("route", routeSummaryText);
-        nextParams.set("impactKg", selectedImpact);
-        nextParams.set("rideId", bookingResponse.ride_id);
-        nextParams.set("matchUser", bookingResponse.matched_user_name);
-        nextParams.set("matchScore", String(Math.round(bookingResponse.score * 100)));
-        nextParams.set("pickupLat", String(resolvedPoints.pickup.lat));
-        nextParams.set("pickupLng", String(resolvedPoints.pickup.lng));
-        nextParams.set("destinationLat", String(resolvedPoints.destination.lat));
-        nextParams.set("destinationLng", String(resolvedPoints.destination.lng));
-
-        const nextSearch = nextParams.toString();
-        navigate(
-          nextSearch
-            ? `/ride/finding-your-ride?${nextSearch}`
-            : "/ride/finding-your-ride",
-        );
+        redirectToFindingRide({
+          rideId: bookingResponse.ride_id,
+          matchUser: bookingResponse.matched_user_name,
+          score: bookingResponse.score,
+        });
         bookingResetTimerRef.current = null;
-      }, 550);
+      }, existingSession ? 140 : 550);
     } catch (error) {
       setBookingStatus("idle");
       setLocationStatusMessage(

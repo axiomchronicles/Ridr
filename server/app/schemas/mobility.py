@@ -122,12 +122,25 @@ class RideBookingRequest(BaseModel):
 class RideBookingResponse(BaseModel):
     ride_id: str
     status: str
+    booking_session_state: Literal["created", "existing"]
+    booking_session_message: str
     matched_user_id: int
     matched_user_name: str
     matched_role: RoleType
     score: float
     reasons: list[str]
     breakdown: MatchScoreBreakdown
+
+
+class RideBookingSessionStateResponse(BaseModel):
+    has_active_session: bool
+    ride_id: str | None = None
+    ride_status: RideStatusType | None = None
+    matched_user_name: str | None = None
+    pickup_label: str | None = None
+    destination_label: str | None = None
+    score: float | None = None
+    message: str
 
 
 class RideSummary(BaseModel):
@@ -157,13 +170,51 @@ class RideTransactionState(BaseModel):
 
 
 class RideTransactionUpdateRequest(BaseModel):
-    action: Literal["cancel", "modify", "accept"]
+    action: Literal["cancel", "modify", "accept", "complete"]
     reason: str | None = Field(default=None, max_length=255)
     pickup: Coordinate | None = None
     destination: Coordinate | None = None
     pickup_label: str | None = Field(default=None, max_length=255)
     destination_label: str | None = Field(default=None, max_length=255)
     departure_time: int | None = Field(default=None, ge=0, le=1439)
+
+
+class RideLobbyParticipant(BaseModel):
+    user_id: int
+    name: str
+    role: RoleType
+    ride_id: str
+    ride_status: RideStatusType
+    distance_km: float
+    vehicle_name: str | None = None
+    lat: float
+    lng: float
+    is_current_user: bool
+
+
+class RideLobbyMessageCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class RideLobbyMessageRead(BaseModel):
+    id: int
+    ride_id: str | None
+    rider_id: int
+    cluster_key: str
+    sender_id: int | None
+    sender_role: str
+    sender_name: str | None = None
+    text: str
+    created_at: datetime
+
+
+class RideMeetingLobbySnapshot(BaseModel):
+    ride_id: str
+    cluster_key: str
+    radius_km: float
+    center: Coordinate
+    participants: list[RideLobbyParticipant]
+    messages: list[RideLobbyMessageRead]
 
 
 class ChatMessageCreate(BaseModel):

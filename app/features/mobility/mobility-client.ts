@@ -46,12 +46,25 @@ export type MatchScoreBreakdown = {
 export type RideBookingResponse = {
   ride_id: string;
   status: string;
+  booking_session_state: "created" | "existing";
+  booking_session_message: string;
   matched_user_id: number;
   matched_user_name: string;
   matched_role: CommuteRole;
   score: number;
   reasons: string[];
   breakdown: MatchScoreBreakdown;
+};
+
+export type RideBookingSessionState = {
+  has_active_session: boolean;
+  ride_id: string | null;
+  ride_status: RideStatus | null;
+  matched_user_name: string | null;
+  pickup_label: string | null;
+  destination_label: string | null;
+  score: number | null;
+  message: string;
 };
 
 export type RideSummary = {
@@ -81,7 +94,7 @@ export type RideTransactionState = {
 };
 
 export type RideTransactionUpdatePayload = {
-  action: "cancel" | "modify" | "accept";
+  action: "cancel" | "modify" | "accept" | "complete";
   reason?: string;
   pickup?: CommuteCoordinate;
   destination?: CommuteCoordinate;
@@ -97,6 +110,40 @@ export type RideChatMessage = {
   sender_role: string;
   text: string;
   created_at: string;
+};
+
+export type RideLobbyParticipant = {
+  user_id: number;
+  name: string;
+  role: CommuteRole;
+  ride_id: string;
+  ride_status: RideStatus;
+  distance_km: number;
+  vehicle_name: string | null;
+  lat: number;
+  lng: number;
+  is_current_user: boolean;
+};
+
+export type RideLobbyMessage = {
+  id: number;
+  ride_id: string | null;
+  rider_id: number;
+  cluster_key: string;
+  sender_id: number | null;
+  sender_role: string;
+  sender_name: string | null;
+  text: string;
+  created_at: string;
+};
+
+export type RideMeetingLobbySnapshot = {
+  ride_id: string;
+  cluster_key: string;
+  radius_km: number;
+  center: CommuteCoordinate;
+  participants: RideLobbyParticipant[];
+  messages: RideLobbyMessage[];
 };
 
 export type VehicleMarker = {
@@ -196,6 +243,14 @@ export async function bookRideMatch(
   });
 }
 
+export async function fetchActiveRideBookingSession(
+  token: string,
+): Promise<RideBookingSessionState> {
+  return requestJson<RideBookingSessionState>("/mobility/rides/booking-session", token, {
+    method: "GET",
+  });
+}
+
 export async function fetchNearbyVehicles(
   token: string,
   params: {
@@ -270,6 +325,42 @@ export async function postRideChatMessage(
 ): Promise<RideChatMessage> {
   return requestJson<RideChatMessage>(
     `/mobility/rides/${encodeURIComponent(rideId)}/chat/messages`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    },
+  );
+}
+
+export async function fetchRideMeetingLobby(
+  token: string,
+  rideId: string,
+  radiusKm = 3.5,
+): Promise<RideMeetingLobbySnapshot> {
+  const query = new URLSearchParams();
+  query.set("radius_km", String(radiusKm));
+
+  return requestJson<RideMeetingLobbySnapshot>(
+    `/mobility/rides/${encodeURIComponent(rideId)}/meeting-lobby?${query.toString()}`,
+    token,
+    {
+      method: "GET",
+    },
+  );
+}
+
+export async function postRideMeetingLobbyMessage(
+  token: string,
+  rideId: string,
+  text: string,
+  radiusKm = 3.5,
+): Promise<RideLobbyMessage> {
+  const query = new URLSearchParams();
+  query.set("radius_km", String(radiusKm));
+
+  return requestJson<RideLobbyMessage>(
+    `/mobility/rides/${encodeURIComponent(rideId)}/meeting-lobby/messages?${query.toString()}`,
     token,
     {
       method: "POST",
@@ -362,6 +453,53 @@ export function connectRideTrackingSocket(args: {
 
       if (payload.type === "tracking_update" && payload.vehicle) {
         args.onVehicleUpdate(payload.vehicle);
+      }
+    } catch {
+      return;
+    }
+  });
+
+  if (args.onError) {
+    socket.addEventListener("error", args.onError);
+  }
+
+  return socket;
+}
+
+export function connectRideMeetingLobbySocket(args: {
+  token: string;
+  rideId: string;
+  radiusKm?: number;
+  onSnapshot?: (snapshot: RideMeetingLobbySnapshot) => void;
+  onMessage: (message: RideLobbyMessage) => void;
+  onError?: (event: Event) => void;
+}): WebSocket {
+  const query = new URLSearchParams();
+  query.set("token", args.token);
+  query.set("radius_km", String(args.radiusKm ?? 3.5));
+
+  const socket = new WebSocket(
+    buildWebSocketUrl(
+      `/mobility/rides/${encodeURIComponent(args.rideId)}/meeting-lobby/ws`,
+      query,
+    ),
+  );
+
+  socket.addEventListener("message", (event) => {
+    try {
+      const payload = JSON.parse(event.data) as {
+        type?: string;
+        snapshot?: RideMeetingLobbySnapshot;
+        message?: RideLobbyMessage;
+      };
+
+      if (payload.type === "lobby_snapshot" && payload.snapshot && args.onSnapshot) {
+        args.onSnapshot(payload.snapshot);
+        return;
+      }
+
+      if (payload.type === "lobby_message" && payload.message) {
+        args.onMessage(payload.message);
       }
     } catch {
       return;

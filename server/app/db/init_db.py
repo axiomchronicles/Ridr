@@ -1,7 +1,7 @@
 from app.db.base import Base
 from app.db.seed_mobility import seed_mobility_data
 from app.db.session import engine
-from app.models import CommuteProfile, RideChatMessage, RideMatch, User, VehicleLocation  # noqa: F401
+from app.models import CommuteProfile, RideBookingSession, RideChatMessage, RideLobbyMessage, RideMatch, User, VehicleLocation  # noqa: F401
 
 
 def init_db() -> None:

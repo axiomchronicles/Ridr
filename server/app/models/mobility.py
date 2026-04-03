@@ -120,3 +120,35 @@ class VehicleLocation(Base):
     source = Column(String(24), nullable=False, default="gps")
 
     recorded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class RideLobbyMessage(Base):
+    __tablename__ = "ride_lobby_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ride_id = Column(Integer, ForeignKey("ride_matches.id", ondelete="SET NULL"), nullable=True, index=True)
+    rider_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    cluster_key = Column(String(96), nullable=False, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    sender_role = Column(String(24), nullable=False, default="system")
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class RideBookingSession(Base):
+    __tablename__ = "ride_booking_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    ride_id = Column(Integer, ForeignKey("ride_matches.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_active = Column(Boolean, nullable=False, default=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    closed_reason = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

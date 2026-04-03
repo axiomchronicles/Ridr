@@ -113,5 +113,6 @@ class VehicleStreamHub:
 
 
 ride_chat_hub = RideSocketHub()
+ride_lobby_hub = RideSocketHub()
 ride_tracking_hub = RideSocketHub()
 vehicle_stream_hub = VehicleStreamHub()
