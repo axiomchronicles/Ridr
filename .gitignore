@@ -10,3 +10,6 @@ server/ridr.db
 # React Router
 /.react-router/
 /build/
+
+# TLS certificate material
+/nginx/ssl/*.pem

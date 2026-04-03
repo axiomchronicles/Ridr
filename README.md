@@ -94,8 +94,29 @@ Optional environment overrides before build/run:
 export VITE_API_BASE_URL=/api/v1
 export VITE_GOOGLE_MAPS_API_KEY=your_key_here
 export JWT_SECRET_KEY=replace-with-a-strong-secret
-export NGINX_PORT=80
+export NGINX_HTTP_PORT=80
+export NGINX_HTTPS_PORT=443
 ```
+
+HTTPS and domain setup for `ecoridr.tubox.cloud`:
+
+- Nginx is configured to redirect HTTP to HTTPS for `ecoridr.tubox.cloud`.
+- Place certificate files at `nginx/ssl/fullchain.pem` and `nginx/ssl/privkey.pem`.
+- Example copy commands from Let's Encrypt:
+
+```bash
+cp /etc/letsencrypt/live/ecoridr.tubox.cloud/fullchain.pem nginx/ssl/fullchain.pem
+cp /etc/letsencrypt/live/ecoridr.tubox.cloud/privkey.pem nginx/ssl/privkey.pem
+```
+
+- For local/testing only, you can generate a self-signed certificate:
+
+```bash
+./nginx/ssl/generate-self-signed.sh
+```
+
+- Start the stack and access the app at `https://ecoridr.tubox.cloud`.
+- If you need ACME HTTP-01 challenge support, challenge files are served from `nginx/www/`.
 
 To stop:
 
