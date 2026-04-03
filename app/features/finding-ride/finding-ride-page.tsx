@@ -89,14 +89,17 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function formatCurrency(value: number, currency: string): string {
+  const normalizedCurrency = currency.toUpperCase();
+  const locale = normalizedCurrency === "INR" ? "en-IN" : "en-US";
+
   try {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
-      currency,
+      currency: normalizedCurrency,
       maximumFractionDigits: 2,
     }).format(value);
   } catch {
-    return `${currency} ${value.toFixed(2)}`;
+    return `${normalizedCurrency} ${value.toFixed(2)}`;
   }
 }
 
@@ -129,7 +132,7 @@ export function FindingRidePage() {
   const rideId = searchParams.get("rideId")?.trim() || "";
   const matchUser = getValue(searchParams, "matchUser", "your closest driver");
   const matchScore = getValue(searchParams, "matchScore", "--");
-  const fare = getValue(searchParams, "fare", "INR 220");
+  const fare = getValue(searchParams, "fare", "₹220");
   const eta = getValue(searchParams, "eta", "2 min");
   const routeSummary = getValue(
     searchParams,

@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 RoleType = Literal["driver", "rider"]
+FareTierType = Literal["standard", "eco", "carpool"]
 RideStatusType = Literal[
     "pending_acceptance",
     "accepted",
@@ -117,6 +118,46 @@ class RideBookingRequest(BaseModel):
     selected_user_id: int | None = None
     max_candidates: int = Field(default=10, ge=1, le=50)
     radius_km: float = Field(default=8.0, gt=0, le=50)
+
+
+class FareEstimateRequest(BaseModel):
+    distance_km: float = Field(gt=0, le=500)
+    duration_minutes: float | None = Field(default=None, gt=0, le=1440)
+    departure_time: int = Field(default=540, ge=0, le=1439)
+    ride_tier: FareTierType = "eco"
+    party_size: int | None = Field(default=None, ge=1, le=6)
+    active_supply_load: int = Field(default=0, ge=0, le=100)
+    pickup_reposition_km: float = Field(default=0.0, ge=0, le=120)
+    pickup_label: str | None = Field(default=None, max_length=255)
+    destination_label: str | None = Field(default=None, max_length=255)
+
+
+class FareEstimateBreakdown(BaseModel):
+    base_fare: float
+    distance_charge: float
+    time_charge: float
+    booking_fee: float
+    operating_fee: float
+    pickup_surcharge: float
+    location_surcharge: float
+    service_multiplier: float
+    demand_multiplier: float
+    traffic_multiplier: float
+    subtotal_before_multiplier: float
+    subtotal_after_multiplier: float
+    minimum_fare: float
+    minimum_fare_applied: bool
+
+
+class FareEstimateResponse(BaseModel):
+    currency: str = "INR"
+    ride_tier: FareTierType
+    party_size: int
+    estimated_duration_minutes: int
+    estimated_total: float
+    estimated_per_rider: float
+    assumptions: list[str]
+    breakdown: FareEstimateBreakdown
 
 
 class RideBookingResponse(BaseModel):

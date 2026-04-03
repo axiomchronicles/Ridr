@@ -25,6 +25,10 @@ from app.schemas.mobility import (
     CommuteInput,
     CommuteUpsertRequest,
     CommuteUpsertResponse,
+    FareEstimateBreakdown,
+    FareEstimateRequest,
+    FareEstimateResponse,
+    FareTierType,
     MatchCandidate,
     MatchRequest,
     MatchResponse,
@@ -70,12 +74,46 @@ CO2_KG_PER_LITER_PETROL = 2.31
 KG_TO_LBS = 2.20462
 KM_TO_MILES = 0.621371
 TREE_ABSORPTION_KG_PER_YEAR = 37.5
-BASELINE_USD_PER_KM = 0.88
-SHARED_USD_PER_KM = 0.57
-BASELINE_USD_BASE = 2.4
-SHARED_USD_BASE = 1.35
-RIDE_TOTAL_FARE_USD_BASE = 3.1
-RIDE_TOTAL_FARE_USD_PER_KM = 1.08
+BASELINE_USD_PER_KM = 20.5
+SHARED_USD_PER_KM = 14.2
+BASELINE_USD_BASE = 48.0
+SHARED_USD_BASE = 35.0
+
+FARE_CURRENCY = "INR"
+FARE_BASE_BY_TIER: dict[FareTierType, float] = {
+    "standard": 68.0,
+    "eco": 58.0,
+    "carpool": 46.0,
+}
+FARE_DISTANCE_RATE_BY_TIER: dict[FareTierType, float] = {
+    "standard": 18.5,
+    "eco": 15.8,
+    "carpool": 13.2,
+}
+FARE_TIME_RATE_BY_TIER: dict[FareTierType, float] = {
+    "standard": 3.6,
+    "eco": 3.0,
+    "carpool": 2.5,
+}
+FARE_MINIMUM_BY_TIER: dict[FareTierType, float] = {
+    "standard": 120.0,
+    "eco": 98.0,
+    "carpool": 82.0,
+}
+FARE_SERVICE_MULTIPLIER_BY_TIER: dict[FareTierType, float] = {
+    "standard": 1.0,
+    "eco": 0.94,
+    "carpool": 0.86,
+}
+FARE_BOOKING_FEE_INR = 14.0
+FARE_OPERATING_FEE_INR = 11.0
+FARE_AIRPORT_SURCHARGE_INR = 55.0
+FARE_LONG_PICKUP_FREE_KM = 1.5
+FARE_LONG_PICKUP_PER_KM_INR = 3.9
+FARE_ESTIMATED_SPEED_KMH = 29.0
+
+PEAK_HOURS = {7, 8, 9, 17, 18, 19, 20}
+LATE_NIGHT_HOURS = {22, 23, 0, 1, 2, 3, 4, 5}
 SUSTAINABILITY_GOAL_USD = 30000.0
 DRIVER_MAX_ACTIVE_RIDERS = 3
 
@@ -255,38 +293,261 @@ def _active_driver_rider_loads(
     }
 
 
-def _estimate_ride_total_fare_usd(ride: RideMatch) -> float:
-    distance_km = _ride_distance_km(ride)
-    return max(4.5, RIDE_TOTAL_FARE_USD_BASE + (distance_km * RIDE_TOTAL_FARE_USD_PER_KM))
+def _traffic_multiplier_for_hour(hour: int) -> float:
+    normalized_hour = hour % 24
+    if normalized_hour in PEAK_HOURS:
+        return 1.22
+    if normalized_hour in LATE_NIGHT_HOURS:
+        return 0.93
+    if 10 <= normalized_hour <= 15:
+        return 0.98
+    return 1.07
+
+
+def _demand_multiplier_for_hour(hour: int, active_supply_load: int) -> float:
+    normalized_hour = hour % 24
+    base_multiplier = 1.0
+
+    if normalized_hour in PEAK_HOURS:
+        base_multiplier += 0.18
+    elif normalized_hour in LATE_NIGHT_HOURS:
+        base_multiplier += 0.1
+
+    load_boost = min(0.24, max(0, active_supply_load - 1) * 0.06)
+    return max(1.0, min(1.75, base_multiplier + load_boost))
+
+
+def _estimate_duration_minutes(distance_km: float, departure_time: int) -> int:
+    hour = (departure_time // 60) % 24
+    traffic_multiplier = _traffic_multiplier_for_hour(hour)
+    duration = ((distance_km / FARE_ESTIMATED_SPEED_KMH) * 60.0 * traffic_multiplier) + 2.0
+    return max(5, int(round(duration)))
+
+
+def _has_location_surcharge(label: str | None) -> bool:
+    if not label:
+        return False
+
+    normalized = label.strip().lower()
+    if not normalized:
+        return False
+
+    surcharge_keywords = (
+        "airport",
+        "terminal",
+        "railway station",
+        "metro hub",
+        "bus terminal",
+    )
+    return any(keyword in normalized for keyword in surcharge_keywords)
+
+
+def _normalize_interest_tokens(raw_interests: list[str] | None) -> set[str]:
+    if not raw_interests:
+        return set()
+
+    normalized: set[str] = set()
+    for item in raw_interests:
+        token = str(item).strip().lower()
+        if token:
+            normalized.add(token)
+    return normalized
+
+
+def _resolve_fare_tier(
+    *,
+    interest_tokens: set[str],
+    is_ev: bool,
+    party_size: int,
+) -> FareTierType:
+    if party_size >= 2:
+        return "carpool"
+
+    explicit_standard = {"standard", "tier:standard", "ride_tier:standard"}
+    explicit_eco = {"eco", "ev", "tier:eco", "ride_tier:eco"}
+    explicit_carpool = {"carpool", "pool", "tier:carpool", "ride_tier:carpool"}
+
+    if interest_tokens.intersection(explicit_carpool):
+        return "carpool"
+    if interest_tokens.intersection(explicit_standard):
+        return "standard"
+    if interest_tokens.intersection(explicit_eco):
+        return "eco"
+
+    return "eco" if is_ev else "standard"
+
+
+def _estimate_fare(
+    *,
+    distance_km: float,
+    departure_time: int,
+    ride_tier: FareTierType,
+    party_size: int,
+    active_supply_load: int,
+    pickup_reposition_km: float,
+    pickup_label: str | None,
+    destination_label: str | None,
+    duration_minutes: float | None = None,
+) -> FareEstimateResponse:
+    normalized_distance_km = max(0.6, distance_km)
+    normalized_party_size = max(1, party_size)
+
+    estimated_duration_minutes = (
+        max(1, int(round(duration_minutes)))
+        if duration_minutes is not None
+        else _estimate_duration_minutes(normalized_distance_km, departure_time)
+    )
+
+    base_fare = FARE_BASE_BY_TIER[ride_tier]
+    distance_charge = normalized_distance_km * FARE_DISTANCE_RATE_BY_TIER[ride_tier]
+    time_charge = estimated_duration_minutes * FARE_TIME_RATE_BY_TIER[ride_tier]
+
+    service_multiplier = FARE_SERVICE_MULTIPLIER_BY_TIER[ride_tier]
+    hour = (departure_time // 60) % 24
+    demand_multiplier = _demand_multiplier_for_hour(hour, active_supply_load)
+    traffic_multiplier = _traffic_multiplier_for_hour(hour)
+    traffic_adjustment = 1.0 + ((traffic_multiplier - 1.0) * 0.35)
+
+    subtotal_before_multiplier = base_fare + distance_charge + time_charge
+    subtotal_after_multiplier = (
+        subtotal_before_multiplier * service_multiplier * demand_multiplier * traffic_adjustment
+    )
+
+    pickup_surcharge = max(0.0, pickup_reposition_km - FARE_LONG_PICKUP_FREE_KM) * FARE_LONG_PICKUP_PER_KM_INR
+    location_surcharge = 0.0
+    if _has_location_surcharge(pickup_label) or _has_location_surcharge(destination_label):
+        location_surcharge = FARE_AIRPORT_SURCHARGE_INR
+
+    minimum_fare = FARE_MINIMUM_BY_TIER[ride_tier]
+    preliminary_total = (
+        subtotal_after_multiplier
+        + FARE_BOOKING_FEE_INR
+        + FARE_OPERATING_FEE_INR
+        + pickup_surcharge
+        + location_surcharge
+    )
+    minimum_fare_applied = preliminary_total < minimum_fare
+    estimated_total = max(minimum_fare, preliminary_total)
+    estimated_per_rider = estimated_total / normalized_party_size
+
+    assumptions = [
+        "Includes base fare, distance, and travel-time components.",
+        "Applies real-time demand and traffic multipliers by departure window.",
+        "Includes booking/operating fees and location surcharges where applicable.",
+    ]
+
+    return FareEstimateResponse(
+        currency=FARE_CURRENCY,
+        ride_tier=ride_tier,
+        party_size=normalized_party_size,
+        estimated_duration_minutes=estimated_duration_minutes,
+        estimated_total=round(estimated_total, 2),
+        estimated_per_rider=round(estimated_per_rider, 2),
+        assumptions=assumptions,
+        breakdown=FareEstimateBreakdown(
+            base_fare=round(base_fare, 2),
+            distance_charge=round(distance_charge, 2),
+            time_charge=round(time_charge, 2),
+            booking_fee=round(FARE_BOOKING_FEE_INR, 2),
+            operating_fee=round(FARE_OPERATING_FEE_INR, 2),
+            pickup_surcharge=round(pickup_surcharge, 2),
+            location_surcharge=round(location_surcharge, 2),
+            service_multiplier=round(service_multiplier, 3),
+            demand_multiplier=round(demand_multiplier, 3),
+            traffic_multiplier=round(traffic_multiplier, 3),
+            subtotal_before_multiplier=round(subtotal_before_multiplier, 2),
+            subtotal_after_multiplier=round(subtotal_after_multiplier, 2),
+            minimum_fare=round(minimum_fare, 2),
+            minimum_fare_applied=minimum_fare_applied,
+        ),
+    )
+
+
+def _estimate_ride_fare_for_match(
+    db: Session,
+    ride: RideMatch,
+    *,
+    party_size: int,
+    active_supply_load: int,
+) -> FareEstimateResponse:
+    rider_commute = (
+        db.scalar(select(CommuteProfile).where(CommuteProfile.id == ride.rider_commute_id))
+        if ride.rider_commute_id is not None
+        else None
+    )
+    driver_commute = (
+        db.scalar(select(CommuteProfile).where(CommuteProfile.id == ride.driver_commute_id))
+        if ride.driver_commute_id is not None
+        else None
+    )
+
+    driver_vehicle_name = driver_commute.vehicle_name if driver_commute is not None else None
+    interest_tokens = _normalize_interest_tokens(
+        rider_commute.pref_interests if rider_commute is not None else None
+    )
+
+    ride_tier = _resolve_fare_tier(
+        interest_tokens=interest_tokens,
+        is_ev=_is_electric_vehicle_name(driver_vehicle_name),
+        party_size=party_size,
+    )
+
+    pickup_reposition_km = 0.0
+    if driver_commute is not None:
+        pickup_reposition_km = max(
+            0.0,
+            haversine_km(
+                driver_commute.origin_lat,
+                driver_commute.origin_lng,
+                ride.pickup_lat,
+                ride.pickup_lng,
+            ),
+        )
+
+    return _estimate_fare(
+        distance_km=_ride_distance_km(ride),
+        duration_minutes=None,
+        departure_time=ride.departure_time,
+        ride_tier=ride_tier,
+        party_size=party_size,
+        active_supply_load=active_supply_load,
+        pickup_reposition_km=pickup_reposition_km,
+        pickup_label=ride.pickup_label,
+        destination_label=ride.destination_label,
+    )
 
 
 def _build_ride_cost_split(db: Session, ride: RideMatch) -> RideCostSplit:
-    total_fare_usd = _estimate_ride_total_fare_usd(ride)
-
     if ride.driver_id is None:
-        return RideCostSplit(
-            party_size=1,
-            total_fare_usd=round(total_fare_usd, 2),
-            your_share_usd=round(total_fare_usd, 2),
-            message="Solo ride fare currently applies.",
+        party_size = 1
+        active_driver_rides = 0
+    else:
+        active_driver_rides = _active_driver_rider_count(
+            db,
+            driver_id=ride.driver_id,
         )
+        party_size = max(1, min(DRIVER_MAX_ACTIVE_RIDERS, active_driver_rides))
 
-    active_driver_rides = _active_driver_rider_count(
+    fare_estimate = _estimate_ride_fare_for_match(
         db,
-        driver_id=ride.driver_id,
+        ride,
+        party_size=party_size,
+        active_supply_load=active_driver_rides,
     )
 
-    party_size = max(1, min(DRIVER_MAX_ACTIVE_RIDERS, active_driver_rides))
-    your_share_usd = total_fare_usd / party_size
+    message = "Includes live demand, traffic, and operating fees."
+    if fare_estimate.party_size > 1:
+        message = (
+            f"Cost is split across {fare_estimate.party_size} riders with dynamic "
+            "traffic and demand adjustments."
+        )
 
     return RideCostSplit(
-        party_size=party_size,
-        total_fare_usd=round(total_fare_usd, 2),
-        your_share_usd=round(your_share_usd, 2),
-        message=(
-            f"Cost is split across {party_size} rider"
-            f"{'s' if party_size != 1 else ''} currently matched with this driver."
-        ),
+        party_size=fare_estimate.party_size,
+        total_fare_usd=round(fare_estimate.estimated_total, 2),
+        your_share_usd=round(fare_estimate.estimated_per_rider, 2),
+        currency=fare_estimate.currency,
+        message=message,
     )
 
 
@@ -1720,6 +1981,25 @@ def find_matches(
         )
 
     return MatchResponse(matches=matches)
+
+
+@router.post("/fare-estimate", response_model=FareEstimateResponse)
+def estimate_fare(payload: FareEstimateRequest) -> FareEstimateResponse:
+    party_size = payload.party_size
+    if party_size is None:
+        party_size = 2 if payload.ride_tier == "carpool" else 1
+
+    return _estimate_fare(
+        distance_km=payload.distance_km,
+        duration_minutes=payload.duration_minutes,
+        departure_time=payload.departure_time,
+        ride_tier=payload.ride_tier,
+        party_size=party_size,
+        active_supply_load=payload.active_supply_load,
+        pickup_reposition_km=payload.pickup_reposition_km,
+        pickup_label=payload.pickup_label,
+        destination_label=payload.destination_label,
+    )
 
 
 @router.post("/rides/book", response_model=RideBookingResponse)

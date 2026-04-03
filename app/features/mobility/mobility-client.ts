@@ -8,6 +8,8 @@ export type RideStatus =
   | "completed"
   | "matched";
 
+export type FareTier = "standard" | "eco" | "carpool";
+
 export type CommuteCoordinate = {
   lat: number;
   lng: number;
@@ -65,6 +67,34 @@ export type RideBookingSessionState = {
   destination_label: string | null;
   score: number | null;
   message: string;
+};
+
+export type FareEstimateBreakdown = {
+  base_fare: number;
+  distance_charge: number;
+  time_charge: number;
+  booking_fee: number;
+  operating_fee: number;
+  pickup_surcharge: number;
+  location_surcharge: number;
+  service_multiplier: number;
+  demand_multiplier: number;
+  traffic_multiplier: number;
+  subtotal_before_multiplier: number;
+  subtotal_after_multiplier: number;
+  minimum_fare: number;
+  minimum_fare_applied: boolean;
+};
+
+export type FareEstimateResponse = {
+  currency: string;
+  ride_tier: FareTier;
+  party_size: number;
+  estimated_duration_minutes: number;
+  estimated_total: number;
+  estimated_per_rider: number;
+  assumptions: string[];
+  breakdown: FareEstimateBreakdown;
 };
 
 export type SustainabilityKpi = {
@@ -358,6 +388,33 @@ export async function fetchActiveRideBookingSession(
   return requestJson<RideBookingSessionState>("/mobility/rides/booking-session", token, {
     method: "GET",
   });
+}
+
+export async function estimateRideFare(payload: {
+  distance_km: number;
+  duration_minutes?: number;
+  departure_time: number;
+  ride_tier: FareTier;
+  party_size?: number;
+  active_supply_load?: number;
+  pickup_reposition_km?: number;
+  pickup_label?: string;
+  destination_label?: string;
+}): Promise<FareEstimateResponse> {
+  const response = await fetch(`${API_BASE_URL}/mobility/fare-estimate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const message = await parseErrorMessage(response);
+    throw new MobilityApiError(message, response.status);
+  }
+
+  return (await response.json()) as FareEstimateResponse;
 }
 
 export async function fetchSustainabilityDashboard(

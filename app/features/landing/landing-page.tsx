@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useJsApiLoader } from "@react-google-maps/api";
 
+import { estimateRideFare } from "~/features/mobility/mobility-client";
 import { RidrMobileNav } from "~/features/shared/components/ridr-mobile-nav";
 import { RidrTopNav } from "~/features/shared/components/ridr-top-nav";
 import { MaterialSymbol } from "~/features/shared/components/material-symbol";
@@ -116,7 +117,7 @@ async function geocodeWithFallback(
   return null;
 }
 
-function estimateFareInr(leg: google.maps.DirectionsLeg | undefined): number {
+function estimateFallbackFareInr(leg: google.maps.DirectionsLeg | undefined): number {
   if (!leg) {
     return 0;
   }
@@ -194,6 +195,7 @@ function InteractiveLandingBookingCard({ mapsApiKey }: { mapsApiKey: string }) {
   });
 
   const locationRequestTokenRef = useRef(0);
+  const fareRequestTokenRef = useRef(0);
 
   const [pickup, setPickup] = useState("");
   const [destination, setDestination] = useState("");
@@ -334,12 +336,49 @@ function InteractiveLandingBookingCard({ mapsApiKey }: { mapsApiKey: string }) {
             return;
           }
 
+          const distanceKm = Math.max(0.6, (leg.distance?.value || 0) / 1000);
+          const durationMinutes = Math.max(
+            1,
+            Math.round((leg.duration_in_traffic?.value || leg.duration?.value || 0) / 60),
+          );
+          const now = new Date();
+          const departureMinutes = now.getHours() * 60 + now.getMinutes();
+          const requestToken = fareRequestTokenRef.current + 1;
+          fareRequestTokenRef.current = requestToken;
+
+          const fallbackFare = inrFormatter.format(estimateFallbackFareInr(leg));
+
           setRouteInsight({
             distanceText: leg.distance?.text || "--",
             durationText: leg.duration_in_traffic?.text || leg.duration?.text || "--",
-            fareText: inrFormatter.format(estimateFareInr(leg)),
+            fareText: fallbackFare,
           });
           setLocationMessage("Live map estimate ready.");
+
+          void estimateRideFare({
+            distance_km: distanceKm,
+            duration_minutes: durationMinutes,
+            departure_time: departureMinutes,
+            ride_tier: "eco",
+            party_size: 1,
+            active_supply_load: 2,
+            pickup_label: normalizedPickup,
+            destination_label: normalizedDestination,
+          })
+            .then((estimate) => {
+              if (disposed || requestToken !== fareRequestTokenRef.current) {
+                return;
+              }
+
+              setRouteInsight({
+                distanceText: leg.distance?.text || "--",
+                durationText: leg.duration_in_traffic?.text || leg.duration?.text || "--",
+                fareText: inrFormatter.format(estimate.estimated_total),
+              });
+            })
+            .catch(() => {
+              return;
+            });
         },
       );
     }

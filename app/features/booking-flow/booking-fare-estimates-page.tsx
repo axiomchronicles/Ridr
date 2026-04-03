@@ -22,7 +22,9 @@ import { RideSelectionSheet } from "./components/ride-selection-sheet";
 import { getAccessToken } from "~/features/auth/auth-client";
 import {
   bookRideMatch,
+  estimateRideFare,
   fetchActiveRideBookingSession,
+  type FareEstimateResponse,
 } from "~/features/mobility/mobility-client";
 import { RidrMobileNav } from "~/features/shared/components/ridr-mobile-nav";
 import { RidrTopNav } from "~/features/shared/components/ridr-top-nav";
@@ -34,6 +36,12 @@ const emptyRouteSnapshot: RouteSnapshot = {
   distanceText: "--",
   durationText: "--",
   hasRoute: false,
+};
+
+const fareTierByRideId: Record<RideId, "standard" | "eco" | "carpool"> = {
+  standard: "standard",
+  eco: "eco",
+  carpool: "carpool",
 };
 
 type LocationFetchStatus = "idle" | "loading" | "ready" | "error";
@@ -95,6 +103,9 @@ export function BookingFareEstimatesPage() {
   const [locationStatusMessage, setLocationStatusMessage] = useState(
     defaultLocationStatusMessage,
   );
+  const [fareEstimates, setFareEstimates] = useState<
+    Partial<Record<RideId, FareEstimateResponse>>
+  >({});
   const [savedPlaces, setSavedPlaces] = useState<SavedPlaces>({});
   const [resolvedPoints, setResolvedPoints] = useState<{
     pickup: google.maps.LatLngLiteral;
@@ -311,11 +322,12 @@ export function BookingFareEstimatesPage() {
       return Math.max(profile.minFare, baseAmount * departureFactor);
     }
 
-    const standardFare = estimateFare("standard");
+    const standardFare = fareEstimates.standard?.estimated_per_rider ?? estimateFare("standard");
 
     return rideOptions.map((ride) => {
       const profile = ridePricingProfiles[ride.id];
-      const estimatedFare = estimateFare(ride.id);
+      const estimatedFare =
+        fareEstimates[ride.id]?.estimated_per_rider ?? estimateFare(ride.id);
       const waitOffset = departureMode === "later" ? 6 : 0;
       const etaMinutes = Math.max(
         2,
@@ -346,7 +358,75 @@ export function BookingFareEstimatesPage() {
     });
   }, [
     departureMode,
+    fareEstimates,
     inrFormatter,
+    routeSnapshot.distanceMiles,
+    routeSnapshot.durationMinutes,
+    routeSnapshot.hasRoute,
+  ]);
+
+  useEffect(() => {
+    const effectiveDistanceKm = (routeSnapshot.hasRoute ? routeSnapshot.distanceMiles : 4.2) * 1.60934;
+    const effectiveDurationMinutes = routeSnapshot.hasRoute
+      ? routeSnapshot.durationMinutes
+      : 17;
+    const now = new Date();
+    const nowDepartureMinutes = now.getHours() * 60 + now.getMinutes();
+    const departureMinutes =
+      departureMode === "later"
+        ? Math.min(1439, nowDepartureMinutes + 35)
+        : nowDepartureMinutes;
+    const departureHour = Math.floor(departureMinutes / 60);
+    const baselineSupplyLoad =
+      (departureHour >= 7 && departureHour <= 9) || (departureHour >= 17 && departureHour <= 20)
+        ? 3
+        : departureHour >= 22 || departureHour <= 5
+          ? 2
+          : 1;
+
+    let disposed = false;
+
+    async function hydrateFareEstimates() {
+      try {
+        const entries = await Promise.all(
+          (Object.keys(fareTierByRideId) as RideId[]).map(async (rideId) => {
+            const estimate = await estimateRideFare({
+              distance_km: effectiveDistanceKm,
+              duration_minutes: effectiveDurationMinutes,
+              departure_time: departureMinutes,
+              ride_tier: fareTierByRideId[rideId],
+              party_size: rideId === "carpool" ? 2 : 1,
+              active_supply_load:
+                rideId === "carpool" ? baselineSupplyLoad + 1 : baselineSupplyLoad,
+              pickup_label: pickup.trim() || undefined,
+              destination_label: destination.trim() || undefined,
+            });
+
+            return [rideId, estimate] as const;
+          }),
+        );
+
+        if (disposed) {
+          return;
+        }
+
+        setFareEstimates(Object.fromEntries(entries));
+      } catch {
+        if (!disposed) {
+          setFareEstimates((current) => current);
+        }
+      }
+    }
+
+    void hydrateFareEstimates();
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    departureMode,
+    destination,
+    pickup,
     routeSnapshot.distanceMiles,
     routeSnapshot.durationMinutes,
     routeSnapshot.hasRoute,
@@ -506,6 +586,12 @@ export function BookingFareEstimatesPage() {
       const now = new Date();
       const departureMinutes = now.getHours() * 60 + now.getMinutes();
       const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay();
+      const rideTier = fareTierByRideId[selectedRideId];
+      const interestTokens = [
+        "daily commute",
+        selectedRideId,
+        `ride_tier:${rideTier}`,
+      ].filter(Boolean);
 
       const bookingResponse = await bookRideMatch(token, {
         commute: {
@@ -520,7 +606,7 @@ export function BookingFareEstimatesPage() {
           preferences: {
             smoking: false,
             music: true,
-            interests: ["eco", "daily commute"],
+            interests: interestTokens,
           },
         },
         max_candidates: 20,
