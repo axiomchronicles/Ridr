@@ -14,7 +14,7 @@ COPY . /app/
 COPY --from=development-dependencies-env /app/node_modules /app/node_modules
 WORKDIR /app
 
-ARG VITE_API_BASE_URL=http://localhost:8000/api/v1
+ARG VITE_API_BASE_URL=/api/v1
 ARG VITE_GOOGLE_MAPS_API_KEY=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY}

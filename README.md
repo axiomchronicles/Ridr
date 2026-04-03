@@ -92,11 +92,14 @@ Optional environment overrides before build/run:
 
 ```bash
 export VITE_API_BASE_URL=/api/v1
+export VITE_DOCKER_API_BASE_URL=/api/v1
 export VITE_GOOGLE_MAPS_API_KEY=your_key_here
 export JWT_SECRET_KEY=replace-with-a-strong-secret
 export NGINX_HTTP_PORT=80
 export NGINX_HTTPS_PORT=443
 ```
+
+`VITE_DOCKER_API_BASE_URL` is used by Docker Compose builds so local development settings in `VITE_API_BASE_URL` do not accidentally leak into production images.
 
 HTTPS and domain setup for `ecoridr.tubox.cloud`:
 

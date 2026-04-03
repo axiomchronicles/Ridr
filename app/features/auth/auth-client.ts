@@ -36,10 +36,38 @@ const AUTH_TOKEN_STORAGE_KEY = "ridr.auth.access_token";
 const AUTH_USER_STORAGE_KEY = "ridr.auth.user";
 const AUTH_SESSION_CHANGED_EVENT = "ridr.auth.session.changed";
 
-const API_BASE_URL = (
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
-  "http://localhost:8000/api/v1"
-).replace(/\/$/, "");
+function resolveApiBaseUrl(): string {
+  const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+
+  if (configuredBaseUrl) {
+    const normalizedBaseUrl = configuredBaseUrl.replace(/\/$/, "");
+
+    if (typeof window !== "undefined") {
+      const currentHostname = window.location.hostname.toLowerCase();
+      const isCurrentHostLocal = currentHostname === "localhost" || currentHostname === "127.0.0.1";
+      const isConfiguredHostLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(
+        normalizedBaseUrl,
+      );
+
+      if (isConfiguredHostLocal && !isCurrentHostLocal) {
+        return "/api/v1";
+      }
+    }
+
+    return normalizedBaseUrl;
+  }
+
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname.toLowerCase();
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8000/api/v1";
+    }
+  }
+
+  return "/api/v1";
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 type ErrorPayload = {
   detail?: string | Array<{ msg?: string }>;
