@@ -10,7 +10,7 @@ services:
       DEBUG: "false"
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/ridr.db}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost","http://127.0.0.1"]}'
     volumes:
       - ridr_backend_data:/app/data
     expose:
