@@ -1,0 +1,415 @@
+.my-rides-page {
+  min-height: 100vh;
+  background: var(--surface-background);
+}
+
+.my-rides-main-layout {
+  width: min(1400px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding-top: calc(var(--top-nav-height) + 0.85rem);
+  padding-bottom: 6rem;
+  display: grid;
+  grid-template-columns: minmax(16rem, 18rem) minmax(24rem, 1fr);
+  gap: 1rem;
+}
+
+.my-rides-side-nav {
+  border-radius: 1rem;
+  border: 1px solid var(--outline-ghost);
+  background: #f8f9fa;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--top-nav-height) - 1.8rem);
+  position: sticky;
+  top: calc(var(--top-nav-height) + 0.75rem);
+}
+
+.my-rides-side-nav h1 {
+  margin: 0;
+  font-size: 1.68rem;
+  line-height: 1;
+  font-family: var(--font-headline);
+  letter-spacing: -0.03em;
+  color: #145a3b;
+}
+
+.my-rides-side-nav > p {
+  margin: 0.35rem 0 1rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: #7a838b;
+  font-weight: 700;
+}
+
+.my-rides-side-nav nav {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.my-rides-side-link {
+  border-radius: 0.72rem;
+  padding: 0.56rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.46rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #58616a;
+}
+
+.my-rides-side-link-active {
+  background: rgba(117, 248, 179, 0.34);
+  color: #0c6440;
+}
+
+.my-rides-cta {
+  margin-top: auto;
+  border-radius: 0.72rem;
+  min-height: 2.9rem;
+  background: var(--secondary);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-headline);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.my-rides-content {
+  display: grid;
+  gap: 1rem;
+}
+
+.my-rides-header span {
+  display: block;
+  margin-bottom: 0.34rem;
+  color: var(--secondary);
+  font-size: 0.67rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.my-rides-header h2 {
+  margin: 0;
+  font-family: var(--font-headline);
+  font-size: clamp(1.62rem, 3.3vw, 3rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+}
+
+.my-rides-header p {
+  margin: 0.5rem 0 0;
+  color: #5f6871;
+  font-size: 0.94rem;
+  max-width: 46rem;
+}
+
+.my-rides-inline-status,
+.my-rides-inline-error {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.my-rides-inline-status {
+  color: #53616c;
+}
+
+.my-rides-inline-error {
+  color: #9a3131;
+}
+
+.my-rides-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(8rem, 1fr));
+  gap: 0.75rem;
+}
+
+.my-rides-kpi-grid article {
+  border-radius: 1rem;
+  border: 1px solid var(--outline-ghost);
+  background: #ffffff;
+  padding: 0.8rem 0.9rem;
+}
+
+.my-rides-kpi-grid small {
+  display: block;
+  color: #66717a;
+  font-size: 0.72rem;
+}
+
+.my-rides-kpi-grid strong {
+  margin-top: 0.2rem;
+  display: block;
+  color: #0f5f3a;
+  font-family: var(--font-headline);
+  font-size: 1.3rem;
+}
+
+.my-rides-list-card {
+  border-radius: 1rem;
+  border: 1px solid var(--outline-ghost);
+  background: #ffffff;
+  padding: 0.9rem;
+}
+
+.my-rides-list-card > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.7rem;
+}
+
+.my-rides-list-card h3 {
+  margin: 0;
+  font-family: var(--font-headline);
+  font-size: 1.4rem;
+  letter-spacing: -0.03em;
+}
+
+.my-rides-list-card > header p {
+  margin: 0;
+  color: #6f7981;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.my-rides-empty-state {
+  min-height: 12rem;
+  border-radius: 0.9rem;
+  border: 1px dashed #d9dee4;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: #66717a;
+  padding: 1rem;
+  gap: 0.4rem;
+}
+
+.my-rides-timeline {
+  position: relative;
+  display: grid;
+  gap: 0.78rem;
+}
+
+.my-rides-timeline::before {
+  content: "";
+  position: absolute;
+  left: 0.37rem;
+  top: 0.05rem;
+  bottom: 0.2rem;
+  width: 2px;
+  background: linear-gradient(180deg, #0f6d43, #d8e3dd);
+}
+
+.my-rides-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.62rem;
+}
+
+.my-rides-timeline-pin {
+  position: relative;
+  z-index: 1;
+  width: 0.76rem;
+  display: flex;
+  justify-content: center;
+  padding-top: 0.12rem;
+}
+
+.my-rides-status-dot {
+  width: 0.76rem;
+  height: 0.76rem;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px #d8e3dd;
+  background: #9ba7b2;
+}
+
+.my-rides-status-dot-matched,
+.my-rides-status-dot-pending_acceptance {
+  background: #5a85ab;
+}
+
+.my-rides-status-dot-accepted,
+.my-rides-status-dot-in_progress {
+  background: #0f6d43;
+}
+
+.my-rides-status-dot-completed {
+  background: #5d7f62;
+}
+
+.my-rides-status-dot-cancelled {
+  background: #a34a4a;
+}
+
+.my-rides-item-content {
+  border-bottom: 1px solid #e3e8ec;
+  padding: 0.02rem 0 0.76rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.my-rides-item:last-child .my-rides-item-content {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.my-rides-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.my-rides-item-head strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.my-rides-item-head small {
+  color: #6e7780;
+  font-size: 0.72rem;
+}
+
+.my-rides-status-pill {
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.22rem 0.5rem;
+}
+
+.my-rides-status-matched,
+.my-rides-status-pending_acceptance {
+  background: #e8eff7;
+  color: #2f5779;
+}
+
+.my-rides-status-accepted,
+.my-rides-status-in_progress {
+  background: rgba(117, 248, 179, 0.28);
+  color: #0c6440;
+}
+
+.my-rides-status-completed {
+  background: #e7ece7;
+  color: #2e5b3b;
+}
+
+.my-rides-status-cancelled {
+  background: #f6e8e8;
+  color: #8d3333;
+}
+
+.my-rides-route {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #3d4953;
+  font-size: 0.8rem;
+}
+
+.my-rides-route p {
+  margin: 0;
+}
+
+.my-rides-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.my-rides-metrics div {
+  border-radius: 0.62rem;
+  border: 1px solid #e3e8ec;
+  background: #ffffff;
+  padding: 0.38rem 0.45rem;
+}
+
+.my-rides-metrics small {
+  display: block;
+  color: #6f7981;
+  font-size: 0.62rem;
+}
+
+.my-rides-metrics strong {
+  display: block;
+  margin-top: 0.1rem;
+  color: #1f2a35;
+  font-size: 0.81rem;
+}
+
+.my-rides-impact-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+}
+
+.my-rides-impact-row p {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: #345f46;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.my-rides-item footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.my-rides-item footer small {
+  color: #6f7981;
+  font-size: 0.68rem;
+}
+
+.my-rides-item footer a {
+  border-radius: 0.62rem;
+  padding: 0.34rem 0.58rem;
+  background: #ebf4ef;
+  color: #0f6440;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 1160px) {
+  .my-rides-main-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .my-rides-side-nav {
+    position: static;
+    min-height: 0;
+  }
+
+  .my-rides-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .my-rides-main-layout {
+    width: calc(100% - 1rem);
+    padding-bottom: 7.5rem;
+  }
+
+  .my-rides-side-nav {
+    display: none;
+  }
+
+  .my-rides-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

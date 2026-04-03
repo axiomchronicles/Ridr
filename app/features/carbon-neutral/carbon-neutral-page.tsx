@@ -1,18 +1,177 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
+import { getAccessToken } from "~/features/auth/auth-client";
+import {
+  fetchActiveRideBookingSession,
+  fetchSustainabilityDashboard,
+  type SustainabilityDashboard,
+  type SustainabilityLeaderboardEntry,
+  type SustainabilityTrendPoint,
+} from "~/features/mobility/mobility-client";
 import { RidrMobileNav } from "~/features/shared/components/ridr-mobile-nav";
 import { RidrTopNav } from "~/features/shared/components/ridr-top-nav";
 import { MaterialSymbol } from "~/features/shared/components/material-symbol";
 
 import "./carbon-neutral-page.css";
 
-const leaderboardAvatars = [
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuCbvYrngvh2U-v5OPpTWKy1Ksrmih9wWv7cJoBdtiAO5BsCCwfIJsKt0MCMls7sUyQ6bbciS1rFzq2ZRBi1XHTgsJIuL7NuOrJNGTImGQCXP1_KVX0iVIWE5EpS_BF-QK_RyvYruBh28NBMj31A7NMZdpXak0DRVIaUU1e12Mlq9aMXgeiRaeIiw5XHIlcHcR26oRlaqlnqWJO_1CPoCPcit2T9ghJnGbP1ncVL06UxscwROZjffg1sJ4Zbj8AYxPve-u98B9x9ZLn5",
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuAydWTvtefZtBkEGp-giw4KFJBF24XtDpk7h6sXNlQGHxx5AFe353Lz49IyG1gMQEUkxFDEwFm7sfbOgg3NeR1bb2FXX_VFrNBNCIdCfyT5DewttWt2vJzHzq4VPuPs5Zmc7Sgf5QfvD2_3ra8HJ5gWNzk4Om1V64Hxll6AdUUsu-Y_6MnfdkozC196GK6AmPvY2dc4BR30NJfmKmij7yPg3qkC38U5Fnilf-eG8mgBWKI0AX_PQBOqSBjJZwrrmYs8T4QkP2yAsRfQ",
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuDgmHbkLFWBFuA-3vrIWe7Y-BgTlhoXFU3FmxjNupvsKeZosDlo_JMom6mhsM9n0zCQtGAgwKaTKYhpldOkIg0cyZK9URr7lXD2uzmYF1ZywQvJX_UcptEVDNqSvB4j7WO3z6VYGqllPlvq7ErbzFPqJkZPZUekYmGdgjzpGQ480-6Zlt3fIxbY0jiDeJ1fD7VxenWUZjW17g9eq0kJTfVNSveoeAnznC9ghO8-MN1aMzwjU-iYJwV7nJ3zIHAXEOhqlrjLI3LEwq6a",
-];
+type HistoryView = "weekly" | "monthly";
+
+const inrFormatter = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 2,
+});
+
+function formatShortDate(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Date unavailable";
+  }
+
+  return parsed.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function toInitials(name: string): string {
+  const parts = name
+    .split(" ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return "RM";
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
 
 export function CarbonNeutralPage() {
+  const [dashboard, setDashboard] = useState<SustainabilityDashboard | null>(null);
+  const [historyView, setHistoryView] = useState<HistoryView>("weekly");
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [messageHref, setMessageHref] = useState<string | null>(null);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      setLoading(false);
+      setErrorMessage("Sign in to view your sustainability analytics.");
+      return;
+    }
+    const authToken = token;
+
+    let disposed = false;
+
+    async function hydrateDashboard() {
+      try {
+        const data = await fetchSustainabilityDashboard(authToken);
+        if (!disposed) {
+          setDashboard(data);
+          setErrorMessage("");
+        }
+      } catch (error) {
+        if (!disposed) {
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Unable to load sustainability dashboard right now.",
+          );
+        }
+      } finally {
+        if (!disposed) {
+          setLoading(false);
+        }
+      }
+    }
+
+    async function hydrateMessageAccess() {
+      try {
+        const session = await fetchActiveRideBookingSession(authToken);
+        if (disposed) {
+          return;
+        }
+
+        const hasMessagingSession =
+          session.has_active_session &&
+          session.ride_id &&
+          (session.ride_status === "accepted" || session.ride_status === "in_progress");
+
+        if (!hasMessagingSession) {
+          setMessageHref(null);
+          return;
+        }
+
+        const query = new URLSearchParams();
+        query.set("rideId", session.ride_id as string);
+
+        if (session.pickup_label?.trim()) {
+          query.set("pickup", session.pickup_label.trim());
+        }
+
+        if (session.destination_label?.trim()) {
+          query.set("destination", session.destination_label.trim());
+        }
+
+        setMessageHref(`/ride/pre-meeting-chat?${query.toString()}`);
+      } catch {
+        if (!disposed) {
+          setMessageHref(null);
+        }
+      }
+    }
+
+    void hydrateDashboard();
+    void hydrateMessageAccess();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const historyPoints: SustainabilityTrendPoint[] = useMemo(() => {
+    if (!dashboard) {
+      return [];
+    }
+
+    return historyView === "weekly" ? dashboard.history_weekly : dashboard.history_monthly;
+  }, [dashboard, historyView]);
+
+  const leaderboardRows = useMemo(() => {
+    if (!dashboard) {
+      return [] as SustainabilityLeaderboardEntry[];
+    }
+
+    const topRows = dashboard.leaderboard.slice(0, 5);
+    if (topRows.some((entry) => entry.is_current_user)) {
+      return topRows;
+    }
+
+    const currentUserRow = dashboard.leaderboard.find((entry) => entry.is_current_user);
+    if (!currentUserRow) {
+      return topRows;
+    }
+
+    return [...topRows.slice(0, 4), currentUserRow].sort((left, right) => left.rank - right.rank);
+  }, [dashboard]);
+
+  const leaderboardAvatars = useMemo(
+    () => leaderboardRows.slice(0, 3),
+    [leaderboardRows],
+  );
+
+  const sevenYearSavings = dashboard?.forecast_7y.projected_money_saved_usd ?? 0;
+  const sevenYearGoalProgress = dashboard?.forecast_7y.goal_progress_percent ?? 0;
+  const thirtyYearImpactLbs = dashboard?.impact_30y.projected_co2_saved_lbs ?? 0;
+  const thirtyYearTrees = dashboard?.impact_30y.projected_tree_equivalent ?? 0;
+
   return (
     <div className="carbon-page">
       <RidrTopNav active="impact" />
@@ -29,16 +188,22 @@ export function CarbonNeutralPage() {
             </Link>
             <Link to="/booking/fare-estimates" className="carbon-side-link">
               <MaterialSymbol name="directions_car" />
+              Book
+            </Link>
+            <Link to="/ride/my-rides" className="carbon-side-link">
+              <MaterialSymbol name="history" />
               My Rides
             </Link>
-            <Link to="/impact/carbon-neutral" className="carbon-side-link carbon-side-link-active">
+            <Link to="/dashboard" className="carbon-side-link carbon-side-link-active">
               <MaterialSymbol name="energy_savings_leaf" filled />
-              Sustainability
+              Dashboard
             </Link>
-            <Link to="/ride/pre-meeting-chat" className="carbon-side-link">
-              <MaterialSymbol name="chat_bubble" />
-              Messages
-            </Link>
+            {messageHref ? (
+              <Link to={messageHref} className="carbon-side-link">
+                <MaterialSymbol name="chat_bubble" />
+                Messages
+              </Link>
+            ) : null}
           </nav>
 
           <Link to="/booking/fare-estimates" className="carbon-report-cta">
@@ -51,9 +216,11 @@ export function CarbonNeutralPage() {
             <span>Your Global Footprint</span>
             <h2>Sustainability Dashboard</h2>
             <p>
-              Visualizing your contribution to a greener planet and a healthier
-              wallet through conscious mobility.
+              Live carbon analytics generated from your ride activity, vehicle profile,
+              and city-level community comparisons.
             </p>
+            {loading ? <p className="carbon-inline-status">Refreshing live sustainability metrics...</p> : null}
+            {!loading && errorMessage ? <p className="carbon-inline-error">{errorMessage}</p> : null}
           </header>
 
           <section className="carbon-top-grid">
@@ -62,22 +229,22 @@ export function CarbonNeutralPage() {
                 <MaterialSymbol name="savings" filled /> Financial Forecast
               </small>
               <h3>
-                If you keep using Ridr, you will save <em>$3,503.11</em> in 7 years.
+                If you keep using Ridr, you can save <em>{inrFormatter.format(sevenYearSavings)}</em> in 7 years.
               </h3>
               <div className="carbon-progress-meta">
                 <span>Current Progress</span>
-                <span>12% of Goal</span>
+                <span>{sevenYearGoalProgress.toFixed(1)}% of Goal</span>
               </div>
               <div className="carbon-progress-track">
-                <div className="carbon-progress-fill" />
+                <div className="carbon-progress-fill" style={{ width: `${Math.max(0, Math.min(100, sevenYearGoalProgress))}%` }} />
               </div>
             </article>
 
             <article className="carbon-impact-card">
               <MaterialSymbol name="cloud_off" filled className="carbon-cloud-icon" />
               <h3>The 30-Year Impact</h3>
-              <strong>You will prevent 102,960 lbs of CO2</strong>
-              <p>Equivalent to planting 1,240 mature trees in urban areas.</p>
+              <strong>You can prevent {Math.round(thirtyYearImpactLbs).toLocaleString()} lbs of CO2</strong>
+              <p>Equivalent to planting {thirtyYearTrees.toLocaleString()} mature trees in urban areas.</p>
             </article>
           </section>
 
@@ -85,31 +252,25 @@ export function CarbonNeutralPage() {
             <article className="carbon-achievements-card">
               <header>
                 <h3>Achievements</h3>
-                <button type="button">View All</button>
+                <button type="button">Live</button>
               </header>
 
               <div>
-                <article>
-                  <MaterialSymbol name="workspace_premium" filled />
-                  <div>
-                    <strong>Carbon Saver</strong>
-                    <p>Prevented 100 lbs of CO2</p>
-                  </div>
-                </article>
-                <article>
-                  <MaterialSymbol name="commute" />
-                  <div>
-                    <strong>Eco Commuter</strong>
-                    <p>10 electric rides in a row</p>
-                  </div>
-                </article>
-                <article className="carbon-achievement-locked">
-                  <MaterialSymbol name="lock" />
-                  <div>
-                    <strong>Forest Guardian</strong>
-                    <p>Reach 500 lbs to unlock</p>
-                  </div>
-                </article>
+                {(dashboard?.achievements || []).map((achievement) => (
+                  <article
+                    key={achievement.key}
+                    className={achievement.unlocked ? "" : "carbon-achievement-locked"}
+                  >
+                    <MaterialSymbol name={achievement.unlocked ? "workspace_premium" : "lock"} filled={achievement.unlocked} />
+                    <div>
+                      <strong>{achievement.title}</strong>
+                      <p>
+                        {achievement.description}
+                        {achievement.unlocked ? " • Unlocked" : ` • ${achievement.progress_percent.toFixed(1)}%`}
+                      </p>
+                    </div>
+                  </article>
+                ))}
               </div>
             </article>
 
@@ -117,53 +278,49 @@ export function CarbonNeutralPage() {
               <header>
                 <h3>Recent Impact History</h3>
                 <div>
-                  <button type="button">Monthly</button>
-                  <button type="button" className="carbon-history-tab-active">
+                  <button
+                    type="button"
+                    className={historyView === "monthly" ? "carbon-history-tab-active" : ""}
+                    onClick={() => setHistoryView("monthly")}
+                  >
+                    Monthly
+                  </button>
+                  <button
+                    type="button"
+                    className={historyView === "weekly" ? "carbon-history-tab-active" : ""}
+                    onClick={() => setHistoryView("weekly")}
+                  >
                     Weekly
                   </button>
                 </div>
               </header>
 
               <div>
-                <article>
-                  <div>
-                    <MaterialSymbol name="bolt" />
+                {(dashboard?.recent_history || []).slice(0, 3).map((entry) => (
+                  <article key={entry.ride_id}>
                     <div>
-                      <strong>Downtown Office to Home</strong>
-                      <p>Oct 24 • 14.2 miles</p>
+                      <MaterialSymbol name={entry.role === "driver" ? "electric_car" : "eco"} />
+                      <div>
+                        <strong>{entry.route_label}</strong>
+                        <p>{formatShortDate(entry.date)} • {entry.distance_miles.toFixed(1)} miles</p>
+                      </div>
                     </div>
+                    <aside>
+                      <strong>+{inrFormatter.format(entry.money_saved_usd)}</strong>
+                      <em>-{entry.co2_saved_lbs.toFixed(1)} lbs CO2</em>
+                    </aside>
+                  </article>
+                ))}
+                {historyPoints.length > 0 ? (
+                  <div className="carbon-trend-strip" role="img" aria-label="Trend summary">
+                    {historyPoints.map((point) => (
+                      <div key={`${historyView}-${point.period_start}`}>
+                        <strong>{point.label}</strong>
+                        <p>{point.co2_saved_lbs.toFixed(1)} lbs</p>
+                      </div>
+                    ))}
                   </div>
-                  <aside>
-                    <strong>+$12.40</strong>
-                    <em>-4.2 lbs CO2</em>
-                  </aside>
-                </article>
-                <article>
-                  <div>
-                    <MaterialSymbol name="eco" />
-                    <div>
-                      <strong>Central Park Mall Loop</strong>
-                      <p>Oct 23 • 8.5 miles</p>
-                    </div>
-                  </div>
-                  <aside>
-                    <strong>+$7.15</strong>
-                    <em>-2.8 lbs CO2</em>
-                  </aside>
-                </article>
-                <article>
-                  <div>
-                    <MaterialSymbol name="electric_car" />
-                    <div>
-                      <strong>Airport Terminal B Transfer</strong>
-                      <p>Oct 21 • 22.1 miles</p>
-                    </div>
-                  </div>
-                  <aside>
-                    <strong>+$18.90</strong>
-                    <em>-8.4 lbs CO2</em>
-                  </aside>
-                </article>
+                ) : null}
               </div>
             </article>
           </section>
@@ -172,51 +329,29 @@ export function CarbonNeutralPage() {
             <header>
               <div>
                 <h3>Community Leaderboard</h3>
-                <p>How you rank against other Ridr members in your city.</p>
+                <p>Real-time city ranking from ride-derived CO2 savings.</p>
               </div>
               <div className="carbon-leader-avatars">
-                {leaderboardAvatars.map((avatar) => (
-                  <img key={avatar} src={avatar} alt="Leader avatar" />
+                {leaderboardAvatars.map((leader) => (
+                  <span key={`leader-initial-${leader.user_id}`}>{toInitials(leader.name)}</span>
                 ))}
-                <span>+12k</span>
+                <span>+{Math.max(0, (dashboard?.leaderboard.length || 0) - leaderboardAvatars.length)}</span>
               </div>
             </header>
 
-            <article>
-              <span>01</span>
-              <div>
-                <strong>Sarah Jenkins</strong>
-                <p>Seattle, WA</p>
-              </div>
-              <aside>
-                <strong>2,410 lbs prevented</strong>
-                <p>Elite Guardian</p>
-              </aside>
-            </article>
-
-            <article className="carbon-you-row">
-              <span>14</span>
-              <div>
-                <strong>You (Alex)</strong>
-                <p>Seattle, WA</p>
-              </div>
-              <aside>
-                <strong>1,024 lbs prevented</strong>
-                <p>Carbon Saver</p>
-              </aside>
-            </article>
-
-            <article>
-              <span>15</span>
-              <div>
-                <strong>Marcus Brown</strong>
-                <p>Tacoma, WA</p>
-              </div>
-              <aside>
-                <strong>988 lbs prevented</strong>
-                <p>Eco Newbie</p>
-              </aside>
-            </article>
+            {leaderboardRows.map((entry) => (
+              <article key={`leader-${entry.user_id}-${entry.rank}`} className={entry.is_current_user ? "carbon-you-row" : ""}>
+                <span>{String(entry.rank).padStart(2, "0")}</span>
+                <div>
+                  <strong>{entry.is_current_user ? `You (${entry.name})` : entry.name}</strong>
+                  <p>{entry.city || "City unknown"}</p>
+                </div>
+                <aside>
+                  <strong>{entry.co2_saved_lbs.toLocaleString()} lbs prevented</strong>
+                  <p>{entry.badge}</p>
+                </aside>
+              </article>
+            ))}
           </section>
         </section>
       </main>

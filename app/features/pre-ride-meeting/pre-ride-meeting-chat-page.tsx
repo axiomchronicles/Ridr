@@ -6,11 +6,12 @@ import {
   MarkerF,
   useJsApiLoader,
 } from "@react-google-maps/api";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 import { getAccessToken, getStoredUser } from "~/features/auth/auth-client";
 import {
   connectRideMeetingLobbySocket,
+  fetchActiveRideBookingSession,
   fetchRideMeetingLobby,
   fetchRideSummary,
   postRideMeetingLobbyMessage,
@@ -207,6 +208,7 @@ function formatParticipantRole(role: RideLobbyParticipant["role"]): string {
 }
 
 export function PreRideMeetingChatPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rideId = searchParams.get("rideId")?.trim() || "";
   const pickupQuery = searchParams.get("pickup")?.trim() || "Terminal 2, Door 4";
@@ -247,6 +249,7 @@ export function PreRideMeetingChatPage() {
   const [chatConnectionStatus, setChatConnectionStatus] = useState(
     rideId ? "Connecting meeting lobby..." : "Ride id missing",
   );
+  const [isSessionValidated, setIsSessionValidated] = useState(false);
 
   const lobbySocketRef = useRef<WebSocket | null>(null);
   const lobbyReconnectTimerRef = useRef<number | null>(null);
@@ -319,6 +322,86 @@ export function PreRideMeetingChatPage() {
       setHoveredParticipantId((current) => (current === participantId ? null : current));
     }, 170);
   }
+
+  useEffect(() => {
+    if (!authToken) {
+      navigate("/booking/fare-estimates", { replace: true });
+      return;
+    }
+
+    const token = authToken;
+
+    let disposed = false;
+
+    async function validateMessageAccess() {
+      try {
+        const session = await fetchActiveRideBookingSession(token);
+        if (disposed) {
+          return;
+        }
+
+        const hasAcceptedSession =
+          session.has_active_session &&
+          session.ride_id &&
+          (session.ride_status === "accepted" || session.ride_status === "in_progress");
+
+        if (!hasAcceptedSession) {
+          if (session.has_active_session && session.ride_id) {
+            const nextParams = new URLSearchParams();
+            nextParams.set("rideId", session.ride_id);
+
+            if (session.pickup_label?.trim()) {
+              nextParams.set("pickup", session.pickup_label.trim());
+            }
+
+            if (session.destination_label?.trim()) {
+              nextParams.set("destination", session.destination_label.trim());
+            }
+
+            navigate(`/ride/finding-your-ride?${nextParams.toString()}`, {
+              replace: true,
+            });
+            return;
+          }
+
+          navigate("/booking/fare-estimates", { replace: true });
+          return;
+        }
+
+        const activeRideId = session.ride_id as string;
+        if (!rideId || rideId !== activeRideId) {
+          const nextParams = new URLSearchParams();
+          nextParams.set("rideId", activeRideId);
+          nextParams.set("ride", "Ridr Eco");
+
+          if (session.pickup_label?.trim()) {
+            nextParams.set("pickup", session.pickup_label.trim());
+          }
+
+          if (session.destination_label?.trim()) {
+            nextParams.set("destination", session.destination_label.trim());
+          }
+
+          navigate(`/ride/pre-meeting-chat?${nextParams.toString()}`, {
+            replace: true,
+          });
+          return;
+        }
+
+        setIsSessionValidated(true);
+      } catch {
+        if (!disposed) {
+          navigate("/booking/fare-estimates", { replace: true });
+        }
+      }
+    }
+
+    void validateMessageAccess();
+
+    return () => {
+      disposed = true;
+    };
+  }, [authToken, navigate, rideId]);
 
   useEffect(() => {
     if (!rideId || !authToken) {
@@ -551,9 +634,15 @@ export function PreRideMeetingChatPage() {
     }
   }
 
+  if (!isSessionValidated) {
+    return (
+      <div className="auth-route-guard-loading">Validating active ride session...</div>
+    );
+  }
+
   return (
     <div className="chat-page">
-      <RidrTopNav active="history" />
+      <RidrTopNav active="rides" />
 
       <main className="chat-main-layout">
         <aside className="chat-sidebar">
@@ -871,7 +960,7 @@ export function PreRideMeetingChatPage() {
         </section>
       </main>
 
-      <RidrMobileNav active="history" />
+      <RidrMobileNav active="rides" />
     </div>
   );
 }

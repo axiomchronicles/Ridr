@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from math import cos, radians, sin
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
 from pydantic import ValidationError
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -28,14 +29,24 @@ from app.schemas.mobility import (
     MatchRequest,
     MatchResponse,
     MatchScoreBreakdown,
+    MyRideItem,
+    MyRidesResponse,
     NearbyVehiclesResponse,
     RideBookingRequest,
     RideBookingResponse,
     RideBookingSessionStateResponse,
+    RideCostSplit,
     RideLobbyMessageCreate,
     RideLobbyMessageRead,
     RideLobbyParticipant,
     RideMeetingLobbySnapshot,
+    SustainabilityAchievement,
+    SustainabilityDashboardResponse,
+    SustainabilityKpi,
+    SustainabilityLeaderboardEntry,
+    SustainabilityProjection,
+    SustainabilityRideHistoryItem,
+    SustainabilityTrendPoint,
     RideSummary,
     RideTransactionState,
     RideTransactionUpdateRequest,
@@ -51,6 +62,22 @@ AUTO_ACCEPT_DELAY_SECONDS = 18
 MEETING_LOBBY_RADIUS_KM = 3.5
 ACTIVE_RIDE_STATUSES = ("matched", "pending_acceptance", "accepted", "in_progress")
 TERMINAL_RIDE_STATUSES = ("cancelled", "completed")
+MESSAGE_ENABLED_RIDE_STATUSES = ("accepted", "in_progress")
+BASELINE_CO2_KG_PER_KM = 0.192
+DEFAULT_ICE_CO2_KG_PER_KM = 0.167
+EV_CO2_KG_PER_KM = 0.055
+CO2_KG_PER_LITER_PETROL = 2.31
+KG_TO_LBS = 2.20462
+KM_TO_MILES = 0.621371
+TREE_ABSORPTION_KG_PER_YEAR = 37.5
+BASELINE_USD_PER_KM = 0.88
+SHARED_USD_PER_KM = 0.57
+BASELINE_USD_BASE = 2.4
+SHARED_USD_BASE = 1.35
+RIDE_TOTAL_FARE_USD_BASE = 3.1
+RIDE_TOTAL_FARE_USD_PER_KM = 1.08
+SUSTAINABILITY_GOAL_USD = 30000.0
+DRIVER_MAX_ACTIVE_RIDERS = 3
 
 
 def _as_utc(timestamp: datetime | None) -> datetime:
@@ -162,6 +189,20 @@ def _maybe_auto_accept_ride(db: Session, ride: RideMatch) -> bool:
     if ride.status not in {"matched", "pending_acceptance"} or ride.driver_id is None:
         return False
 
+    active_other_rides = _active_driver_rider_count(
+        db,
+        driver_id=ride.driver_id,
+        exclude_ride_id=ride.id,
+    )
+    if active_other_rides >= DRIVER_MAX_ACTIVE_RIDERS:
+        ride.status = "cancelled"
+        _append_system_message(
+            db,
+            ride.id,
+            "Ride auto-cancelled because assigned driver reached active rider capacity.",
+        )
+        return True
+
     created_at = _as_utc(ride.created_at)
     elapsed_seconds = int((datetime.now(timezone.utc) - created_at).total_seconds())
     if elapsed_seconds < AUTO_ACCEPT_DELAY_SECONDS:
@@ -170,6 +211,83 @@ def _maybe_auto_accept_ride(db: Session, ride: RideMatch) -> bool:
     ride.status = "accepted"
     _append_system_message(db, ride.id, "Driver accepted the ride request.")
     return True
+
+
+def _active_driver_rider_count(
+    db: Session,
+    *,
+    driver_id: int,
+    exclude_ride_id: int | None = None,
+) -> int:
+    query = select(func.count(RideMatch.id)).where(
+        RideMatch.driver_id == driver_id,
+        RideMatch.status.in_(ACTIVE_RIDE_STATUSES),
+        RideMatch.rider_id.is_not(None),
+    )
+
+    if exclude_ride_id is not None:
+        query = query.where(RideMatch.id != exclude_ride_id)
+
+    return int(db.scalar(query) or 0)
+
+
+def _active_driver_rider_loads(
+    db: Session,
+    driver_ids: set[int],
+) -> dict[int, int]:
+    if not driver_ids:
+        return {}
+
+    rows = db.execute(
+        select(RideMatch.driver_id, func.count(RideMatch.id))
+        .where(
+            RideMatch.driver_id.in_(driver_ids),
+            RideMatch.status.in_(ACTIVE_RIDE_STATUSES),
+            RideMatch.rider_id.is_not(None),
+        )
+        .group_by(RideMatch.driver_id)
+    ).all()
+
+    return {
+        int(driver_id): int(count)
+        for driver_id, count in rows
+        if driver_id is not None
+    }
+
+
+def _estimate_ride_total_fare_usd(ride: RideMatch) -> float:
+    distance_km = _ride_distance_km(ride)
+    return max(4.5, RIDE_TOTAL_FARE_USD_BASE + (distance_km * RIDE_TOTAL_FARE_USD_PER_KM))
+
+
+def _build_ride_cost_split(db: Session, ride: RideMatch) -> RideCostSplit:
+    total_fare_usd = _estimate_ride_total_fare_usd(ride)
+
+    if ride.driver_id is None:
+        return RideCostSplit(
+            party_size=1,
+            total_fare_usd=round(total_fare_usd, 2),
+            your_share_usd=round(total_fare_usd, 2),
+            message="Solo ride fare currently applies.",
+        )
+
+    active_driver_rides = _active_driver_rider_count(
+        db,
+        driver_id=ride.driver_id,
+    )
+
+    party_size = max(1, min(DRIVER_MAX_ACTIVE_RIDERS, active_driver_rides))
+    your_share_usd = total_fare_usd / party_size
+
+    return RideCostSplit(
+        party_size=party_size,
+        total_fare_usd=round(total_fare_usd, 2),
+        your_share_usd=round(your_share_usd, 2),
+        message=(
+            f"Cost is split across {party_size} rider"
+            f"{'s' if party_size != 1 else ''} currently matched with this driver."
+        ),
+    )
 
 
 def _build_ride_summary(db: Session, ride: RideMatch, current_user: User) -> RideSummary:
@@ -199,6 +317,7 @@ def _build_ride_summary(db: Session, ride: RideMatch, current_user: User) -> Rid
         destination_label=ride.destination_label,
         score=ride.total_score,
         reasons=ride.score_reasons or [],
+        cost_split=_build_ride_cost_split(db, ride),
         updated_at=_as_utc(ride.updated_at),
         transaction=_build_transaction_state(ride, current_user),
     )
@@ -344,6 +463,551 @@ def _resolve_active_ride_session_for_rider(db: Session, rider_id: int) -> RideMa
         reason="stale",
     )
     return None
+
+
+def _is_electric_vehicle_name(vehicle_name: str | None) -> bool:
+    if not vehicle_name:
+        return False
+
+    normalized_name = vehicle_name.lower()
+    ev_keywords = ("ev", "electric", "tesla", "kona", "ioniq", "leaf", "byd", "zs")
+    return any(keyword in normalized_name for keyword in ev_keywords)
+
+
+def _ride_distance_km(ride: RideMatch) -> float:
+    distance = haversine_km(
+        ride.pickup_lat,
+        ride.pickup_lng,
+        ride.destination_lat,
+        ride.destination_lng,
+    )
+    return max(0.6, distance)
+
+
+def _ride_impact_weight(status_value: str) -> float:
+    if status_value == "completed":
+        return 1.0
+    if status_value == "in_progress":
+        return 0.85
+    if status_value == "accepted":
+        return 0.7
+    if status_value in {"pending_acceptance", "matched"}:
+        return 0.45
+    return 0.0
+
+
+def _route_label_from_ride(ride: RideMatch) -> str:
+    pickup = (ride.pickup_label or "Pickup").strip() or "Pickup"
+    destination = (ride.destination_label or "Destination").strip() or "Destination"
+    return f"{pickup} to {destination}"
+
+
+def _compute_ride_sustainability_metrics(
+    ride: RideMatch,
+    driver_commute: CommuteProfile | None,
+    *,
+    current_user_id: int,
+) -> dict[str, object]:
+    distance_km = _ride_distance_km(ride)
+    occupancy = 2 if ride.rider_id is not None and ride.driver_id is not None else 1
+
+    vehicle_name = driver_commute.vehicle_name if driver_commute is not None else None
+    is_ev = _is_electric_vehicle_name(vehicle_name)
+
+    if is_ev:
+        actual_per_km = EV_CO2_KG_PER_KM
+    elif driver_commute is not None and driver_commute.fuel_efficiency and driver_commute.fuel_efficiency > 0:
+        actual_per_km = max(0.04, CO2_KG_PER_LITER_PETROL / float(driver_commute.fuel_efficiency))
+    else:
+        actual_per_km = DEFAULT_ICE_CO2_KG_PER_KM
+
+    actual_per_passenger_km = actual_per_km / max(1, occupancy)
+
+    baseline_co2_kg = BASELINE_CO2_KG_PER_KM * distance_km
+    actual_co2_kg = actual_per_passenger_km * distance_km
+    co2_saved_kg = max(0.0, baseline_co2_kg - actual_co2_kg)
+
+    baseline_cost_usd = BASELINE_USD_BASE + (distance_km * BASELINE_USD_PER_KM)
+    shared_rate_per_km = SHARED_USD_PER_KM * (0.92 if is_ev else 1.0)
+    actual_cost_usd = SHARED_USD_BASE + (distance_km * shared_rate_per_km)
+    if occupancy == 1:
+        actual_cost_usd *= 0.94
+
+    money_saved_usd = max(0.0, baseline_cost_usd - actual_cost_usd)
+
+    role: Literal["rider", "driver"] = "rider" if current_user_id == ride.rider_id else "driver"
+
+    return {
+        "ride": ride,
+        "distance_km": distance_km,
+        "distance_miles": distance_km * KM_TO_MILES,
+        "co2_saved_kg": co2_saved_kg,
+        "co2_saved_lbs": co2_saved_kg * KG_TO_LBS,
+        "money_saved_usd": money_saved_usd,
+        "status": ride.status,
+        "timestamp": _as_utc(ride.updated_at or ride.created_at),
+        "route_label": _route_label_from_ride(ride),
+        "role": role,
+        "vehicle_name": vehicle_name,
+        "is_ev": is_ev,
+        "weight": _ride_impact_weight(ride.status),
+    }
+
+
+def _period_start_utc(value: datetime, mode: str) -> datetime:
+    normalized = _as_utc(value)
+    if mode == "weekly":
+        start = normalized - timedelta(days=normalized.weekday())
+        return start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return normalized.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _build_trend_points(
+    metrics: list[dict[str, object]],
+    *,
+    mode: str,
+    periods: int,
+    now_utc: datetime,
+) -> list[SustainabilityTrendPoint]:
+    bucket_totals: dict[datetime, dict[str, float]] = defaultdict(
+        lambda: {"rides": 0.0, "co2": 0.0, "money": 0.0}
+    )
+
+    for item in metrics:
+        timestamp = item.get("timestamp")
+        if not isinstance(timestamp, datetime):
+            continue
+
+        bucket = _period_start_utc(timestamp, mode)
+        bucket_totals[bucket]["rides"] += 1
+        bucket_totals[bucket]["co2"] += float(item.get("co2_saved_lbs", 0.0))
+        bucket_totals[bucket]["money"] += float(item.get("money_saved_usd", 0.0))
+
+    if mode == "weekly":
+        current_bucket = _period_start_utc(now_utc, "weekly")
+        ordered_buckets = [
+            current_bucket - timedelta(days=7 * index)
+            for index in range(periods - 1, -1, -1)
+        ]
+    else:
+        current_bucket = _period_start_utc(now_utc, "monthly")
+        ordered_buckets: list[datetime] = []
+        current_month_index = (current_bucket.year * 12) + (current_bucket.month - 1)
+        for index in range(periods - 1, -1, -1):
+            target_month_index = current_month_index - index
+            target_year = target_month_index // 12
+            target_month = (target_month_index % 12) + 1
+            ordered_buckets.append(
+                datetime(target_year, target_month, 1, tzinfo=timezone.utc)
+            )
+
+    trend_points: list[SustainabilityTrendPoint] = []
+    for bucket in ordered_buckets:
+        totals = bucket_totals.get(bucket, {"rides": 0.0, "co2": 0.0, "money": 0.0})
+        label = bucket.strftime("%d %b") if mode == "weekly" else bucket.strftime("%b %Y")
+        trend_points.append(
+            SustainabilityTrendPoint(
+                period_start=bucket,
+                label=label,
+                rides=int(totals["rides"]),
+                co2_saved_lbs=round(totals["co2"], 2),
+                money_saved_usd=round(totals["money"], 2),
+            )
+        )
+
+    return trend_points
+
+
+def _build_projection(
+    *,
+    years: int,
+    monthly_co2_saved_lbs: float,
+    monthly_money_saved_usd: float,
+) -> SustainabilityProjection:
+    projected_co2_saved_lbs = max(0.0, monthly_co2_saved_lbs * 12 * years)
+    projected_money_saved_usd = max(0.0, monthly_money_saved_usd * 12 * years)
+    projected_co2_kg = projected_co2_saved_lbs / KG_TO_LBS
+
+    return SustainabilityProjection(
+        years=years,
+        projected_money_saved_usd=round(projected_money_saved_usd, 2),
+        projected_co2_saved_lbs=round(projected_co2_saved_lbs, 2),
+        projected_tree_equivalent=max(0, int(round(projected_co2_kg / TREE_ABSORPTION_KG_PER_YEAR))),
+        goal_progress_percent=round(
+            min(100.0, (projected_money_saved_usd / SUSTAINABILITY_GOAL_USD) * 100),
+            1,
+        ),
+        annualized_co2_saved_lbs=round(monthly_co2_saved_lbs * 12, 2),
+    )
+
+
+def _leaderboard_badge(co2_saved_lbs: float) -> str:
+    if co2_saved_lbs >= 2400:
+        return "Elite Guardian"
+    if co2_saved_lbs >= 1000:
+        return "Carbon Saver"
+    if co2_saved_lbs >= 500:
+        return "Eco Commuter"
+    return "Eco Newbie"
+
+
+def _build_sustainability_dashboard(
+    db: Session,
+    current_user: User,
+) -> SustainabilityDashboardResponse:
+    now_utc = datetime.now(timezone.utc)
+
+    rides_for_user = db.scalars(
+        select(RideMatch)
+        .where(
+            or_(
+                RideMatch.rider_id == current_user.id,
+                RideMatch.driver_id == current_user.id,
+            ),
+            RideMatch.status != "cancelled",
+        )
+        .order_by(RideMatch.updated_at.desc(), RideMatch.created_at.desc())
+    ).all()
+
+    driver_commute_ids = {
+        ride.driver_commute_id
+        for ride in rides_for_user
+        if ride.driver_commute_id is not None
+    }
+    commutes_by_id = {
+        commute.id: commute
+        for commute in db.scalars(
+            select(CommuteProfile).where(CommuteProfile.id.in_(driver_commute_ids))
+        ).all()
+    }
+
+    metrics = [
+        _compute_ride_sustainability_metrics(
+            ride,
+            commutes_by_id.get(ride.driver_commute_id) if ride.driver_commute_id is not None else None,
+            current_user_id=current_user.id,
+        )
+        for ride in rides_for_user
+    ]
+
+    weighted_distance_km = sum(
+        float(item["distance_km"]) * float(item["weight"])
+        for item in metrics
+    )
+    weighted_co2_saved_kg = sum(
+        float(item["co2_saved_kg"]) * float(item["weight"])
+        for item in metrics
+    )
+    weighted_money_saved_usd = sum(
+        float(item["money_saved_usd"]) * float(item["weight"])
+        for item in metrics
+    )
+
+    total_rides = len(rides_for_user)
+    completed_rides = sum(1 for ride in rides_for_user if ride.status == "completed")
+    active_rides = sum(1 for ride in rides_for_user if ride.status in ACTIVE_RIDE_STATUSES)
+
+    co2_saved_lbs = weighted_co2_saved_kg * KG_TO_LBS
+    avg_co2_saved_lbs = co2_saved_lbs / max(1, total_rides)
+
+    valid_timestamps = [
+        item.get("timestamp")
+        for item in metrics
+        if isinstance(item.get("timestamp"), datetime)
+    ]
+    if valid_timestamps:
+        oldest_timestamp = min(valid_timestamps)
+        days_span = max(30, (_as_utc(now_utc) - _as_utc(oldest_timestamp)).days + 1)
+    else:
+        days_span = 30
+
+    monthly_factor = 30.0 / max(1, days_span)
+    monthly_co2_saved_lbs = co2_saved_lbs * monthly_factor
+    monthly_money_saved_usd = weighted_money_saved_usd * monthly_factor
+
+    forecast_7y = _build_projection(
+        years=7,
+        monthly_co2_saved_lbs=monthly_co2_saved_lbs,
+        monthly_money_saved_usd=monthly_money_saved_usd,
+    )
+    impact_30y = _build_projection(
+        years=30,
+        monthly_co2_saved_lbs=monthly_co2_saved_lbs,
+        monthly_money_saved_usd=monthly_money_saved_usd,
+    )
+
+    ev_completed_rides = sum(
+        1
+        for item in metrics
+        if item.get("status") == "completed" and bool(item.get("is_ev"))
+    )
+
+    achievements = [
+        SustainabilityAchievement(
+            key="carbon_saver",
+            title="Carbon Saver",
+            description="Prevented 100 lbs of CO2",
+            unlocked=co2_saved_lbs >= 100,
+            progress_percent=round(min(100.0, (co2_saved_lbs / 100) * 100), 1),
+        ),
+        SustainabilityAchievement(
+            key="eco_commuter",
+            title="Eco Commuter",
+            description="Complete 10 electric rides",
+            unlocked=ev_completed_rides >= 10,
+            progress_percent=round(min(100.0, (ev_completed_rides / 10) * 100), 1),
+        ),
+        SustainabilityAchievement(
+            key="forest_guardian",
+            title="Forest Guardian",
+            description="Prevent 500 lbs of CO2",
+            unlocked=co2_saved_lbs >= 500,
+            progress_percent=round(min(100.0, (co2_saved_lbs / 500) * 100), 1),
+        ),
+    ]
+
+    recent_history: list[SustainabilityRideHistoryItem] = []
+    for item in metrics[:6]:
+        ride_obj = item.get("ride")
+        if not isinstance(ride_obj, RideMatch):
+            continue
+
+        timestamp = item.get("timestamp")
+        if not isinstance(timestamp, datetime):
+            timestamp = now_utc
+
+        role = item.get("role", "rider")
+        if role not in {"rider", "driver"}:
+            role = "rider"
+
+        recent_history.append(
+            SustainabilityRideHistoryItem(
+                ride_id=ride_obj.ride_uid,
+                date=timestamp,
+                route_label=str(item.get("route_label") or "Route"),
+                distance_miles=round(float(item.get("distance_miles", 0.0)), 2),
+                money_saved_usd=round(float(item.get("money_saved_usd", 0.0)), 2),
+                co2_saved_lbs=round(float(item.get("co2_saved_lbs", 0.0)), 2),
+                role=role,  # type: ignore[arg-type]
+                status=ride_obj.status,  # type: ignore[arg-type]
+                vehicle_name=str(item.get("vehicle_name")) if item.get("vehicle_name") else None,
+            )
+        )
+
+    history_weekly = _build_trend_points(
+        metrics,
+        mode="weekly",
+        periods=8,
+        now_utc=now_utc,
+    )
+    history_monthly = _build_trend_points(
+        metrics,
+        mode="monthly",
+        periods=6,
+        now_utc=now_utc,
+    )
+
+    rides_for_leaderboard = db.scalars(
+        select(RideMatch)
+        .where(RideMatch.status != "cancelled")
+        .order_by(RideMatch.updated_at.desc(), RideMatch.created_at.desc())
+    ).all()
+
+    leaderboard_commute_ids = {
+        ride.driver_commute_id
+        for ride in rides_for_leaderboard
+        if ride.driver_commute_id is not None
+    }
+    leaderboard_commutes = {
+        commute.id: commute
+        for commute in db.scalars(
+            select(CommuteProfile).where(CommuteProfile.id.in_(leaderboard_commute_ids))
+        ).all()
+    }
+
+    leaderboard_totals_lbs: dict[int, float] = defaultdict(float)
+    for ride in rides_for_leaderboard:
+        ride_metrics = _compute_ride_sustainability_metrics(
+            ride,
+            leaderboard_commutes.get(ride.driver_commute_id) if ride.driver_commute_id is not None else None,
+            current_user_id=current_user.id,
+        )
+        weighted_saved_lbs = float(ride_metrics["co2_saved_lbs"]) * float(ride_metrics["weight"])
+
+        unique_participants = {ride.rider_id, ride.driver_id}
+        for participant_id in unique_participants:
+            if participant_id is None:
+                continue
+            leaderboard_totals_lbs[participant_id] += weighted_saved_lbs
+
+    leaderboard_user_ids = set(leaderboard_totals_lbs.keys())
+    leaderboard_user_ids.add(current_user.id)
+    users_for_leaderboard = {
+        user.id: user
+        for user in db.scalars(select(User).where(User.id.in_(leaderboard_user_ids))).all()
+    }
+
+    sorted_leaderboard = sorted(
+        leaderboard_totals_lbs.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    if current_user.id not in {user_id for user_id, _ in sorted_leaderboard}:
+        sorted_leaderboard.append((current_user.id, 0.0))
+
+    leaderboard: list[SustainabilityLeaderboardEntry] = []
+    for rank, (user_id, saved_lbs) in enumerate(sorted_leaderboard[:12], start=1):
+        leader = users_for_leaderboard.get(user_id)
+        if leader is None:
+            continue
+
+        name = f"{leader.first_name} {leader.last_name}".strip() or "Ridr Member"
+        leaderboard.append(
+            SustainabilityLeaderboardEntry(
+                rank=rank,
+                user_id=user_id,
+                name=name,
+                city=leader.city,
+                co2_saved_lbs=round(saved_lbs, 2),
+                badge=_leaderboard_badge(saved_lbs),
+                is_current_user=user_id == current_user.id,
+            )
+        )
+
+    return SustainabilityDashboardResponse(
+        as_of=now_utc,
+        kpis=SustainabilityKpi(
+            total_rides=total_rides,
+            completed_rides=completed_rides,
+            active_rides=active_rides,
+            total_distance_km=round(weighted_distance_km, 2),
+            total_distance_miles=round(weighted_distance_km * KM_TO_MILES, 2),
+            co2_saved_kg=round(weighted_co2_saved_kg, 2),
+            co2_saved_lbs=round(co2_saved_lbs, 2),
+            estimated_trees=max(0, int(round(weighted_co2_saved_kg / TREE_ABSORPTION_KG_PER_YEAR))),
+            money_saved_usd=round(weighted_money_saved_usd, 2),
+            avg_co2_saved_lbs_per_ride=round(avg_co2_saved_lbs, 2),
+        ),
+        forecast_7y=forecast_7y,
+        impact_30y=impact_30y,
+        achievements=achievements,
+        history_weekly=history_weekly,
+        history_monthly=history_monthly,
+        recent_history=recent_history,
+        leaderboard=leaderboard,
+    )
+
+
+def _build_my_rides_response(
+    db: Session,
+    current_user: User,
+) -> MyRidesResponse:
+    now_utc = datetime.now(timezone.utc)
+
+    rides_for_user = db.scalars(
+        select(RideMatch)
+        .where(
+            or_(
+                RideMatch.rider_id == current_user.id,
+                RideMatch.driver_id == current_user.id,
+            )
+        )
+        .order_by(RideMatch.updated_at.desc(), RideMatch.created_at.desc())
+    ).all()
+
+    matched_user_ids: set[int] = set()
+    driver_commute_ids: set[int] = set()
+
+    for ride in rides_for_user:
+        matched_user_id = ride.driver_id if current_user.id == ride.rider_id else ride.rider_id
+        if matched_user_id is not None:
+            matched_user_ids.add(matched_user_id)
+
+        if ride.driver_commute_id is not None:
+            driver_commute_ids.add(ride.driver_commute_id)
+
+    users_by_id = {
+        user.id: user
+        for user in db.scalars(select(User).where(User.id.in_(matched_user_ids))).all()
+    }
+
+    commutes_by_id = {
+        commute.id: commute
+        for commute in db.scalars(
+            select(CommuteProfile).where(CommuteProfile.id.in_(driver_commute_ids))
+        ).all()
+    }
+
+    ride_items: list[MyRideItem] = []
+    total_distance_miles = 0.0
+    total_co2_saved_lbs = 0.0
+    total_money_saved_usd = 0.0
+
+    for ride in rides_for_user:
+        role: Literal["rider", "driver"] = "rider" if current_user.id == ride.rider_id else "driver"
+        matched_user_id = ride.driver_id if role == "rider" else ride.rider_id
+        matched_user = users_by_id.get(matched_user_id) if matched_user_id is not None else None
+        matched_user_name = (
+            f"{matched_user.first_name} {matched_user.last_name}".strip()
+            if matched_user is not None
+            else None
+        )
+
+        driver_commute = (
+            commutes_by_id.get(ride.driver_commute_id)
+            if ride.driver_commute_id is not None
+            else None
+        )
+
+        sustainability_metrics = _compute_ride_sustainability_metrics(
+            ride,
+            driver_commute,
+            current_user_id=current_user.id,
+        )
+        distance_miles = float(sustainability_metrics.get("distance_miles", 0.0))
+        co2_saved_lbs = float(sustainability_metrics.get("co2_saved_lbs", 0.0))
+        money_saved_usd = float(sustainability_metrics.get("money_saved_usd", 0.0))
+        weight = float(sustainability_metrics.get("weight", 0.0))
+
+        cost_split = _build_ride_cost_split(db, ride)
+
+        total_distance_miles += distance_miles * weight
+        total_co2_saved_lbs += co2_saved_lbs * weight
+        total_money_saved_usd += money_saved_usd * weight
+
+        ride_items.append(
+            MyRideItem(
+                ride_id=ride.ride_uid,
+                status=ride.status,  # type: ignore[arg-type]
+                role=role,  # type: ignore[arg-type]
+                matched_user_name=matched_user_name,
+                pickup_label=ride.pickup_label,
+                destination_label=ride.destination_label,
+                updated_at=_as_utc(ride.updated_at or ride.created_at),
+                distance_miles=round(distance_miles, 2),
+                total_fare_usd=round(cost_split.total_fare_usd, 2),
+                your_share_usd=round(cost_split.your_share_usd, 2),
+                split_party_size=cost_split.party_size,
+                co2_saved_lbs=round(co2_saved_lbs, 2),
+                money_saved_usd=round(money_saved_usd, 2),
+                vehicle_name=driver_commute.vehicle_name if driver_commute is not None else None,
+            )
+        )
+
+    active_rides = sum(1 for ride in rides_for_user if ride.status in ACTIVE_RIDE_STATUSES)
+    completed_rides = sum(1 for ride in rides_for_user if ride.status == "completed")
+
+    return MyRidesResponse(
+        as_of=now_utc,
+        total_rides=len(rides_for_user),
+        active_rides=active_rides,
+        completed_rides=completed_rides,
+        total_distance_miles=round(total_distance_miles, 2),
+        total_co2_saved_lbs=round(total_co2_saved_lbs, 2),
+        total_money_saved_usd=round(total_money_saved_usd, 2),
+        rides=ride_items,
+    )
 
 
 def _normalize_lobby_radius(radius_km: float) -> float:
@@ -733,6 +1397,22 @@ def _build_match_candidates(
             )
         )
 
+    if requester_profile.role == "rider":
+        candidate_driver_ids = {
+            candidate.user_id
+            for candidate in scored
+            if candidate.role == "driver"
+        }
+        driver_loads = _active_driver_rider_loads(db, candidate_driver_ids)
+        scored = [
+            candidate
+            for candidate in scored
+            if not (
+                candidate.role == "driver"
+                and driver_loads.get(candidate.user_id, 0) >= DRIVER_MAX_ACTIVE_RIDERS
+            )
+        ]
+
     scored.sort(key=lambda item: item.score, reverse=True)
     return scored[:max_candidates]
 
@@ -756,9 +1436,24 @@ def _build_nearest_compatible_fallback(
     nearest_destination_distance = 0.0
     shortest_combined_distance: float | None = None
 
+    driver_loads = (
+        _active_driver_rider_loads(
+            db,
+            {
+                candidate.user_id
+                for candidate in candidates
+            },
+        )
+        if target_role == "driver"
+        else {}
+    )
+
     for candidate in candidates:
-        if target_role == "driver" and (candidate.seats_available or 0) <= 0:
-            continue
+        if target_role == "driver":
+            if (candidate.seats_available or 0) <= 0:
+                continue
+            if driver_loads.get(candidate.user_id, 0) >= DRIVER_MAX_ACTIVE_RIDERS:
+                continue
 
         origin_distance = haversine_km(
             requester_profile.origin_lat,
@@ -829,6 +1524,14 @@ def _resolve_ride_for_user(db: Session, ride_uid: str, user_id: int) -> RideMatc
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride access denied")
 
     return ride
+
+
+def _assert_message_access(ride: RideMatch) -> None:
+    if ride.status not in MESSAGE_ENABLED_RIDE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Messaging is available only after ride acceptance.",
+        )
 
 
 def _chat_message_to_read(message: RideChatMessage, ride_uid: str) -> ChatMessageRead:
@@ -1114,6 +1817,19 @@ def book_ride_match(
             detail="Role compatibility invalid for direct pairing",
         )
 
+    active_driver_rides = _active_driver_rider_count(
+        db,
+        driver_id=driver_id,
+    )
+    if active_driver_rides >= DRIVER_MAX_ACTIVE_RIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Selected driver has reached the maximum active rider capacity "
+                f"({DRIVER_MAX_ACTIVE_RIDERS})."
+            ),
+        )
+
     ride_uid = f"ride_{uuid.uuid4().hex[:12]}"
     ride = RideMatch(
         ride_uid=ride_uid,
@@ -1213,6 +1929,22 @@ def get_active_ride_booking_session(
         score=ride_summary.score,
         message="Active ride booking session found.",
     )
+
+
+@router.get("/rides/my-rides", response_model=MyRidesResponse)
+def get_my_rides(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MyRidesResponse:
+    return _build_my_rides_response(db, current_user)
+
+
+@router.get("/sustainability/dashboard", response_model=SustainabilityDashboardResponse)
+def get_sustainability_dashboard(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SustainabilityDashboardResponse:
+    return _build_sustainability_dashboard(db, current_user)
 
 
 @router.get("/rides/{ride_uid}", response_model=RideSummary)
@@ -1341,6 +2073,21 @@ def update_ride_transaction(
                 detail="Ride is not awaiting acceptance",
             )
 
+        if ride.driver_id is not None:
+            active_other_rides = _active_driver_rider_count(
+                db,
+                driver_id=ride.driver_id,
+                exclude_ride_id=ride.id,
+            )
+            if active_other_rides >= DRIVER_MAX_ACTIVE_RIDERS:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Cannot accept ride because driver has reached maximum "
+                        f"active rider capacity ({DRIVER_MAX_ACTIVE_RIDERS})."
+                    ),
+                )
+
         ride.status = "accepted"
         _append_system_message(db, ride.id, "Driver accepted the ride request.")
 
@@ -1372,6 +2119,7 @@ def get_ride_chat_messages(
     current_user: User = Depends(get_current_user),
 ) -> list[ChatMessageRead]:
     ride = _resolve_ride_for_user(db, ride_uid, current_user.id)
+    _assert_message_access(ride)
     messages = db.scalars(
         select(RideChatMessage)
         .where(RideChatMessage.ride_id == ride.id)
@@ -1389,6 +2137,7 @@ async def post_ride_chat_message(
     current_user: User = Depends(get_current_user),
 ) -> ChatMessageRead:
     ride = _resolve_ride_for_user(db, ride_uid, current_user.id)
+    _assert_message_access(ride)
     sender_role = "driver" if ride.driver_id == current_user.id else "rider"
     message = _create_chat_message(
         db,
@@ -1417,6 +2166,7 @@ def get_ride_meeting_lobby(
     current_user: User = Depends(get_current_user),
 ) -> RideMeetingLobbySnapshot:
     ride = _resolve_ride_for_user(db, ride_uid, current_user.id)
+    _assert_message_access(ride)
     snapshot = _build_meeting_lobby_snapshot(
         db,
         ride,
@@ -1442,6 +2192,7 @@ async def post_ride_meeting_lobby_message(
     current_user: User = Depends(get_current_user),
 ) -> RideLobbyMessageRead:
     ride = _resolve_ride_for_user(db, ride_uid, current_user.id)
+    _assert_message_access(ride)
     snapshot = _build_meeting_lobby_snapshot(
         db,
         ride,
@@ -1557,6 +2308,7 @@ async def ride_chat_websocket(websocket: WebSocket, ride_uid: str) -> None:
     try:
         user = _resolve_user_from_token(db, _extract_token_from_websocket(websocket))
         ride = _resolve_ride_for_user(db, ride_uid, user.id)
+        _assert_message_access(ride)
 
         await ride_chat_hub.connect(ride_uid, websocket)
         await websocket.send_json({"type": "ack", "message": "Chat connected"})
@@ -1605,6 +2357,7 @@ async def ride_meeting_lobby_websocket(websocket: WebSocket, ride_uid: str) -> N
     try:
         user = _resolve_user_from_token(db, _extract_token_from_websocket(websocket))
         ride = _resolve_ride_for_user(db, ride_uid, user.id)
+        _assert_message_access(ride)
 
         try:
             radius_km = float(websocket.query_params.get("radius_km", str(MEETING_LOBBY_RADIUS_KM)))

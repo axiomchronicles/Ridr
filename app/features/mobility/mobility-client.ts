@@ -67,6 +67,86 @@ export type RideBookingSessionState = {
   message: string;
 };
 
+export type SustainabilityKpi = {
+  total_rides: number;
+  completed_rides: number;
+  active_rides: number;
+  total_distance_km: number;
+  total_distance_miles: number;
+  co2_saved_kg: number;
+  co2_saved_lbs: number;
+  estimated_trees: number;
+  money_saved_usd: number;
+  avg_co2_saved_lbs_per_ride: number;
+};
+
+export type SustainabilityProjection = {
+  years: number;
+  projected_money_saved_usd: number;
+  projected_co2_saved_lbs: number;
+  projected_tree_equivalent: number;
+  goal_progress_percent: number;
+  annualized_co2_saved_lbs: number;
+};
+
+export type SustainabilityTrendPoint = {
+  period_start: string;
+  label: string;
+  rides: number;
+  co2_saved_lbs: number;
+  money_saved_usd: number;
+};
+
+export type SustainabilityRideHistoryItem = {
+  ride_id: string;
+  date: string;
+  route_label: string;
+  distance_miles: number;
+  money_saved_usd: number;
+  co2_saved_lbs: number;
+  role: CommuteRole;
+  status: RideStatus;
+  vehicle_name: string | null;
+};
+
+export type SustainabilityAchievement = {
+  key: string;
+  title: string;
+  description: string;
+  unlocked: boolean;
+  progress_percent: number;
+};
+
+export type SustainabilityLeaderboardEntry = {
+  rank: number;
+  user_id: number;
+  name: string;
+  city: string | null;
+  co2_saved_lbs: number;
+  badge: string;
+  is_current_user: boolean;
+};
+
+export type SustainabilityDashboard = {
+  as_of: string;
+  kpis: SustainabilityKpi;
+  forecast_7y: SustainabilityProjection;
+  impact_30y: SustainabilityProjection;
+  achievements: SustainabilityAchievement[];
+  history_weekly: SustainabilityTrendPoint[];
+  history_monthly: SustainabilityTrendPoint[];
+  recent_history: SustainabilityRideHistoryItem[];
+  leaderboard: SustainabilityLeaderboardEntry[];
+};
+
+export type RideCostSplit = {
+  party_size: number;
+  total_fare_usd: number;
+  your_share_usd: number;
+  currency: string;
+  message: string;
+};
+
 export type RideSummary = {
   ride_id: string;
   status: RideStatus;
@@ -80,8 +160,37 @@ export type RideSummary = {
   destination_label: string | null;
   score: number;
   reasons: string[];
+  cost_split: RideCostSplit | null;
   updated_at: string;
   transaction: RideTransactionState;
+};
+
+export type MyRideItem = {
+  ride_id: string;
+  status: RideStatus;
+  role: CommuteRole;
+  matched_user_name: string | null;
+  pickup_label: string | null;
+  destination_label: string | null;
+  updated_at: string;
+  distance_miles: number;
+  total_fare_usd: number;
+  your_share_usd: number;
+  split_party_size: number;
+  co2_saved_lbs: number;
+  money_saved_usd: number;
+  vehicle_name: string | null;
+};
+
+export type MyRidesResponse = {
+  as_of: string;
+  total_rides: number;
+  active_rides: number;
+  completed_rides: number;
+  total_distance_miles: number;
+  total_co2_saved_lbs: number;
+  total_money_saved_usd: number;
+  rides: MyRideItem[];
 };
 
 export type RideTransactionState = {
@@ -247,6 +356,20 @@ export async function fetchActiveRideBookingSession(
   token: string,
 ): Promise<RideBookingSessionState> {
   return requestJson<RideBookingSessionState>("/mobility/rides/booking-session", token, {
+    method: "GET",
+  });
+}
+
+export async function fetchSustainabilityDashboard(
+  token: string,
+): Promise<SustainabilityDashboard> {
+  return requestJson<SustainabilityDashboard>("/mobility/sustainability/dashboard", token, {
+    method: "GET",
+  });
+}
+
+export async function fetchMyRides(token: string): Promise<MyRidesResponse> {
+  return requestJson<MyRidesResponse>("/mobility/rides/my-rides", token, {
     method: "GET",
   });
 }

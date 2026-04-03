@@ -88,6 +88,18 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function formatCurrency(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${currency} ${value.toFixed(2)}`;
+  }
+}
+
 export function FindingRidePage() {
   const [searchParams] = useSearchParams();
   const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
@@ -189,24 +201,30 @@ export function FindingRidePage() {
   }, [matchScore, nearbyRiders.length, rideSummaryState?.status]);
 
   const transactionState = rideSummaryState?.transaction ?? null;
+  const costSplit = rideSummaryState?.cost_split ?? null;
   const canContinueToChat = rideSummaryState?.status === "accepted";
   const matchDisplayUser = rideSummaryState?.matched_user_name || matchUser;
   const matchDisplayScore =
     rideSummaryState !== null
       ? String(Math.round(rideSummaryState.score * 100))
       : matchScore;
+  const fareDisplay = costSplit
+    ? formatCurrency(costSplit.your_share_usd, costSplit.currency)
+    : fare;
 
   useEffect(() => {
     if (!rideId || !authToken) {
       return;
     }
 
+    const token = authToken;
+
     let disposed = false;
     let refreshTimer: number | null = null;
 
     async function refreshRideSummary() {
       try {
-        const nextSummary = await fetchRideSummary(authToken, rideId);
+        const nextSummary = await fetchRideSummary(token, rideId);
         if (disposed) {
           return;
         }
@@ -261,12 +279,14 @@ export function FindingRidePage() {
       return;
     }
 
+    const token = authToken;
+
     let disposed = false;
     let liveSocket: WebSocket | null = null;
 
     async function hydrateNearbyRiders() {
       try {
-        const riders = await fetchNearbyVehicles(authToken, {
+        const riders = await fetchNearbyVehicles(token, {
           lat: pickupPoint.lat,
           lng: pickupPoint.lng,
           radiusKm: 14,
@@ -288,7 +308,7 @@ export function FindingRidePage() {
       }
 
       liveSocket = connectVehicleStreamSocket({
-        token: authToken,
+        token,
         lat: pickupPoint.lat,
         lng: pickupPoint.lng,
         radiusKm: 14,
@@ -577,9 +597,21 @@ export function FindingRidePage() {
                 </div>
                 <div>
                   <span>Estimated fare</span>
-                  <strong>{fare}</strong>
+                  <strong>{fareDisplay}</strong>
                 </div>
               </div>
+
+              {costSplit ? (
+                <div className="finding-split-card">
+                  <p className="finding-split-kicker">Live fare split</p>
+                  <strong>{formatCurrency(costSplit.your_share_usd, costSplit.currency)} per rider</strong>
+                  <small>{costSplit.message}</small>
+                  <div className="finding-split-meta">
+                    <span>{costSplit.party_size} riders</span>
+                    <span>Total {formatCurrency(costSplit.total_fare_usd, costSplit.currency)}</span>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="finding-timeout-card">
                 <MaterialSymbol name="timer" className="finding-timeout-icon" />

@@ -373,6 +373,54 @@
   font-size: 0.8rem;
 }
 
+.finding-split-card {
+  margin-top: 0.72rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(15, 109, 67, 0.26);
+  background: rgba(232, 247, 239, 0.62);
+  padding: 0.68rem;
+}
+
+.finding-split-kicker {
+  margin: 0;
+  color: #4f6f61;
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.finding-split-card strong {
+  margin-top: 0.16rem;
+  display: block;
+  font-size: 0.86rem;
+}
+
+.finding-split-card small {
+  margin-top: 0.14rem;
+  display: block;
+  color: rgba(12, 44, 29, 0.72);
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.finding-split-meta {
+  margin-top: 0.42rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.finding-split-meta span {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(15, 109, 67, 0.2);
+  color: #145b3f;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0.2rem 0.45rem;
+}
+
 .finding-timeout-card {
   margin-top: 0.9rem;
   border-radius: 0.8rem;

@@ -42,6 +42,8 @@ env/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir .
 - `POST /api/v1/mobility/matches` - Ranked commute matches with explainability
 - `POST /api/v1/mobility/rides/book` - Create ride session or return existing active ride session for rider
 - `GET /api/v1/mobility/rides/booking-session` - Fetch active ride booking session for current rider
+- `GET /api/v1/mobility/rides/my-rides` - Aggregated rider/driver history with split fare and impact metrics
+- `GET /api/v1/mobility/sustainability/dashboard` - Live sustainability analytics (CO2 saved, projections, trends, leaderboard)
 - `GET /api/v1/mobility/rides/{ride_uid}` - Ride summary, transaction state, and action capabilities
 - `PATCH /api/v1/mobility/rides/{ride_uid}/transaction` - Transaction actions: modify, cancel, accept, complete
 - `GET /api/v1/mobility/rides/{ride_uid}/chat/messages` - Chat history for a ride

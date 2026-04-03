@@ -9,7 +9,7 @@ import {
 } from "~/features/auth/auth-client";
 import { MaterialSymbol } from "./material-symbol";
 
-export type NavSection = "dashboard" | "impact" | "history" | "ride";
+export type NavSection = "dashboard" | "impact" | "rides" | "ride";
 
 type RidrTopNavProps = {
   active?: NavSection;
@@ -19,8 +19,8 @@ type RidrTopNavProps = {
 const links: Array<{ label: string; to: string; key: NavSection }> = [
   { label: "Home", to: "/", key: "dashboard" },
   { label: "Book", to: "/booking/fare-estimates", key: "ride" },
-  { label: "Messages", to: "/ride/pre-meeting-chat", key: "history" },
-  { label: "Impact", to: "/impact/carbon-neutral", key: "impact" },
+  { label: "My Rides", to: "/ride/my-rides", key: "rides" },
+  { label: "Dashboard", to: "/dashboard", key: "impact" },
 ];
 
 const profileAvatar =

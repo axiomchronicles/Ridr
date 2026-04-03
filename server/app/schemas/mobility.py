@@ -143,6 +143,86 @@ class RideBookingSessionStateResponse(BaseModel):
     message: str
 
 
+class RideCostSplit(BaseModel):
+    party_size: int
+    total_fare_usd: float
+    your_share_usd: float
+    currency: str = "INR"
+    message: str
+
+
+class SustainabilityKpi(BaseModel):
+    total_rides: int
+    completed_rides: int
+    active_rides: int
+    total_distance_km: float
+    total_distance_miles: float
+    co2_saved_kg: float
+    co2_saved_lbs: float
+    estimated_trees: int
+    money_saved_usd: float
+    avg_co2_saved_lbs_per_ride: float
+
+
+class SustainabilityProjection(BaseModel):
+    years: int
+    projected_money_saved_usd: float
+    projected_co2_saved_lbs: float
+    projected_tree_equivalent: int
+    goal_progress_percent: float
+    annualized_co2_saved_lbs: float
+
+
+class SustainabilityTrendPoint(BaseModel):
+    period_start: datetime
+    label: str
+    rides: int
+    co2_saved_lbs: float
+    money_saved_usd: float
+
+
+class SustainabilityRideHistoryItem(BaseModel):
+    ride_id: str
+    date: datetime
+    route_label: str
+    distance_miles: float
+    money_saved_usd: float
+    co2_saved_lbs: float
+    role: RoleType
+    status: RideStatusType
+    vehicle_name: str | None = None
+
+
+class SustainabilityAchievement(BaseModel):
+    key: str
+    title: str
+    description: str
+    unlocked: bool
+    progress_percent: float
+
+
+class SustainabilityLeaderboardEntry(BaseModel):
+    rank: int
+    user_id: int
+    name: str
+    city: str | None = None
+    co2_saved_lbs: float
+    badge: str
+    is_current_user: bool
+
+
+class SustainabilityDashboardResponse(BaseModel):
+    as_of: datetime
+    kpis: SustainabilityKpi
+    forecast_7y: SustainabilityProjection
+    impact_30y: SustainabilityProjection
+    achievements: list[SustainabilityAchievement]
+    history_weekly: list[SustainabilityTrendPoint]
+    history_monthly: list[SustainabilityTrendPoint]
+    recent_history: list[SustainabilityRideHistoryItem]
+    leaderboard: list[SustainabilityLeaderboardEntry]
+
+
 class RideSummary(BaseModel):
     ride_id: str
     status: RideStatusType
@@ -156,8 +236,37 @@ class RideSummary(BaseModel):
     destination_label: str | None = None
     score: float
     reasons: list[str]
+    cost_split: RideCostSplit | None = None
     updated_at: datetime
     transaction: "RideTransactionState"
+
+
+class MyRideItem(BaseModel):
+    ride_id: str
+    status: RideStatusType
+    role: RoleType
+    matched_user_name: str | None = None
+    pickup_label: str | None = None
+    destination_label: str | None = None
+    updated_at: datetime
+    distance_miles: float
+    total_fare_usd: float
+    your_share_usd: float
+    split_party_size: int
+    co2_saved_lbs: float
+    money_saved_usd: float
+    vehicle_name: str | None = None
+
+
+class MyRidesResponse(BaseModel):
+    as_of: datetime
+    total_rides: int
+    active_rides: int
+    completed_rides: int
+    total_distance_miles: float
+    total_co2_saved_lbs: float
+    total_money_saved_usd: float
+    rides: list[MyRideItem]
 
 
 class RideTransactionState(BaseModel):

@@ -624,7 +624,7 @@ export function LandingPage() {
             <article className="landing-impact-card">
               <MaterialSymbol name="payments" className="landing-impact-icon" />
               <small>Annual Savings</small>
-              <h4>Save $500/year</h4>
+              <h4>Save ₹500/year</h4>
               <p>
                 Based on your average commute. Efficient routing and shared rides
                 optimize your wallet and the planet.
