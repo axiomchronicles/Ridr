@@ -75,7 +75,40 @@ npm run build
 
 ### Docker Deployment
 
-To build and run using Docker:
+To containerize both frontend and backend with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Frontend will be available at `http://localhost:3000` and backend at `http://localhost:8000`.
+
+To run detached:
+
+```bash
+docker compose up --build -d
+```
+
+To stop containers:
+
+```bash
+docker compose down
+```
+
+To remove containers and backend data volume:
+
+```bash
+docker compose down -v
+```
+
+If you need Google Maps in container builds, export your key before building:
+
+```bash
+export VITE_GOOGLE_MAPS_API_KEY=your_key_here
+docker compose up --build
+```
+
+If you only want frontend as a standalone image:
 
 ```bash
 docker build -t my-app .
