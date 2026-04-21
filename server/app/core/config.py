@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24
 
     cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]

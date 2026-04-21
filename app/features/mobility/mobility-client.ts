@@ -303,6 +303,10 @@ type ErrorPayload = {
   detail?: string | Array<{ msg?: string }>;
 };
 
+function isLocalHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
 function resolveApiBaseUrl(): string {
   const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
 
@@ -311,13 +315,17 @@ function resolveApiBaseUrl(): string {
 
     if (typeof window !== "undefined") {
       const currentHostname = window.location.hostname.toLowerCase();
-      const isCurrentHostLocal = currentHostname === "localhost" || currentHostname === "127.0.0.1";
+      const isCurrentHostLocal = isLocalHostname(currentHostname);
       const isConfiguredHostLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(
         normalizedBaseUrl,
       );
 
       if (isConfiguredHostLocal && !isCurrentHostLocal) {
         return "/api/v1";
+      }
+
+      if (normalizedBaseUrl.startsWith("/") && isCurrentHostLocal) {
+        return `http://localhost:8000${normalizedBaseUrl}`;
       }
     }
 
@@ -326,7 +334,7 @@ function resolveApiBaseUrl(): string {
 
   if (typeof window !== "undefined") {
     const hostname = window.location.hostname.toLowerCase();
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
+    if (isLocalHostname(hostname)) {
       return "http://localhost:8000/api/v1";
     }
   }

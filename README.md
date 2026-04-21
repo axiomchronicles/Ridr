@@ -77,16 +77,45 @@ npm run build
 
 This repository now includes two Docker Compose deployment modes:
 
-- `docker-compose.yml` - builds frontend/backend locally and runs Nginx as the public reverse proxy.
-- `docker-compose.server.yml` - pulls prebuilt frontend/backend images on a server and runs Nginx as the public reverse proxy.
+- `docker-compose.yml` - builds the frontend/backend locally, tags them for GHCR, and exposes ports `3000` and `8000` directly on the host.
+- `docker-compose.server.yml` - pulls the GHCR images on a VM and runs Nginx as the public reverse proxy.
 
-Nginx is the only public entrypoint, so the app is available at `http://localhost` by default.
+For local testing, the app is available at `http://localhost:3000` and the API at `http://localhost:8000`.
 
 #### Local Production-Like Build (build images from source)
 
 ```bash
-docker compose -f docker-compose.yml up --build -d
+docker login ghcr.io
+export GHCR_NAMESPACE=your-github-username
+export RIDR_IMAGE_TAG=latest
+docker compose -f docker-compose.yml build
+docker compose -f docker-compose.yml push
+docker compose -f docker-compose.yml up -d
 ```
+
+If you are building on macOS for a Linux VM, use `buildx` so the pushed images are Linux-compatible:
+
+```bash
+docker login ghcr.io
+export GHCR_NAMESPACE=your-github-username
+export RIDR_IMAGE_TAG=latest
+
+docker buildx build \
+	--platform linux/amd64 \
+	--push \
+	-t ghcr.io/$GHCR_NAMESPACE/ridr-backend:$RIDR_IMAGE_TAG \
+	./server
+
+docker buildx build \
+	--platform linux/amd64 \
+	--push \
+	--build-arg VITE_API_BASE_URL=/api/v1 \
+	--build-arg VITE_GOOGLE_MAPS_API_KEY="$VITE_GOOGLE_MAPS_API_KEY" \
+	-t ghcr.io/$GHCR_NAMESPACE/ridr-frontend:$RIDR_IMAGE_TAG \
+	.
+```
+
+Use `linux/arm64` instead if your VM runs on ARM.
 
 Optional environment overrides before build/run:
 
@@ -95,11 +124,10 @@ export VITE_API_BASE_URL=/api/v1
 export VITE_DOCKER_API_BASE_URL=/api/v1
 export VITE_GOOGLE_MAPS_API_KEY=your_key_here
 export JWT_SECRET_KEY=replace-with-a-strong-secret
-export NGINX_HTTP_PORT=80
-export NGINX_HTTPS_PORT=443
 ```
 
 `VITE_DOCKER_API_BASE_URL` is used by Docker Compose builds so local development settings in `VITE_API_BASE_URL` do not accidentally leak into production images.
+`GHCR_NAMESPACE` controls the GitHub Container Registry path used by both compose files, and `RIDR_IMAGE_TAG` keeps the local build/push and server pull on the same version.
 
 HTTPS and domain setup for `ecoridr.tubox.cloud`:
 
@@ -153,10 +181,14 @@ docker compose -f docker-compose.yml down -v
 
 #### Server Deployment (pull frontend/backend images)
 
-Deploy by building and starting containers directly on the server:
+Pull the published GHCR images and start the VM stack:
 
 ```bash
-docker compose -f docker-compose.server.yml up --build -d
+docker login ghcr.io
+export GHCR_NAMESPACE=your-github-username
+export RIDR_IMAGE_TAG=latest
+docker compose -f docker-compose.server.yml pull
+docker compose -f docker-compose.server.yml up -d
 ```
 
 Stop server deployment:
