@@ -1,4 +1,4 @@
-# Ridr Backend (FastAPI)
+EcoRidr Backend (FastAPI)
 
 A production-style FastAPI backend using SQLAlchemy and JWT authentication.
 
