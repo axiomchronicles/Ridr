@@ -78,7 +78,7 @@ npm run build
 This repository now includes two Docker Compose deployment modes:
 
 - `docker-compose.yml` - builds the frontend/backend locally, tags them for GHCR, and exposes ports `3000` and `8000` directly on the host.
-- `docker-compose.server.yml` - pulls the GHCR images on a VM and runs Nginx as the public reverse proxy.
+- `docker-compose.server.yml` - pulls the GHCR images on a VM and runs Nginx as the public reverse proxy over HTTP.
 
 For local testing, the app is available at `http://localhost:3000` and the API at `http://localhost:8000`.
 
@@ -190,6 +190,8 @@ export RIDR_IMAGE_TAG=latest
 docker compose -f docker-compose.server.yml pull
 docker compose -f docker-compose.server.yml up -d
 ```
+
+The VM stack is HTTP-only, so you can reach it directly at the VM IP or hostname on port `80`.
 
 Stop server deployment:
 
